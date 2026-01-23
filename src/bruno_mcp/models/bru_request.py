@@ -1,0 +1,39 @@
+"""BruRequest data model for Bruno .bru files."""
+from pathlib import Path
+from typing import Optional
+
+from pydantic import BaseModel
+
+
+class BruRequest(BaseModel):
+    """Pydantic model representing a parsed .bru file."""
+
+    filepath: str
+    meta: dict  # {name, type, seq}
+    method: str  # GET, POST, etc.
+    url: str
+    params: dict  # Query parameters
+    headers: dict
+    body: Optional[dict] = None  # {type: "json|form|multipart", content: "..."}
+    auth: Optional[dict] = None  # {type: "bearer|basic", token: "..."}
+
+    def get_name(self) -> str:
+        """Get the display name of the request from meta section.
+
+        Returns:
+            Request name from meta, or 'Unnamed Request' if not found.
+        """
+        return self.meta.get("name", "Unnamed Request")
+
+    def get_request_id(self) -> str:
+        """Generate request ID from filepath.
+
+        The request ID is the relative path from collection root without the .bru extension.
+        For example: "users/create-user.bru" -> "users/create-user"
+
+        Returns:
+            Request identifier string.
+        """
+        path = Path(self.filepath)
+        # path.stem is already a str, but explicit for type safety
+        return path.stem
