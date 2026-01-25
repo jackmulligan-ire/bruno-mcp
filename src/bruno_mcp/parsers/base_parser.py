@@ -20,7 +20,7 @@ class BaseParser:
         sections = {}
         lines = content.split('\n')
         current_section = None
-        current_lines = []
+        current_lines: list[str] = []
         brace_count = 0
 
         for line in lines:
