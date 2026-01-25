@@ -35,13 +35,15 @@ class BaseParser:
                     continue
 
             if current_section:
-                if stripped == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        sections[current_section] = current_lines
-                        current_section = None
-                        current_lines = []
-                        continue
+                opening_braces = line.count('{')
+                closing_braces = line.count('}')
+                brace_count += opening_braces - closing_braces
+                
+                if brace_count == 0:
+                    sections[current_section] = current_lines
+                    current_section = None
+                    current_lines = []
+                    continue
 
                 if stripped:
                     current_lines.append(line.strip())

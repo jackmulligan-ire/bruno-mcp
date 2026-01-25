@@ -1,0 +1,43 @@
+meta {
+  name: Nested Data Test
+  type: http
+  seq: 101
+}
+
+post {
+  url: https://api.example.com/data
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "user": {
+      "name": "Alice Smith",
+      "email": "alice@example.com",
+      "address": {
+        "street": "456 Oak Ave",
+        "city": "Portland",
+        "state": "OR",
+        "coordinates": {
+          "lat": 45.5152,
+          "lng": -122.6784
+        }
+      },
+      "preferences": {
+        "theme": "light",
+        "notifications": {
+          "email": true,
+          "push": false
+        }
+      }
+    },
+    "tags": ["premium", "verified", "active"],
+    "metadata": {
+      "created": "2024-01-15",
+      "lastLogin": "2024-01-20"
+    }
+  }
+}

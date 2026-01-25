@@ -1,4 +1,5 @@
 """Tests for BruParser - Bruno .bru file parser."""
+import json
 import pytest
 
 from bruno_mcp.parsers import BruParser
@@ -167,3 +168,79 @@ class TestBruParserErrorHandling:
 
         with pytest.raises(FileNotFoundError):
             parser.parse_file("/nonexistent/path/to/file.bru")
+
+
+class TestBruParserBodyParsing:
+    """Test body parsing with complex structures and nested braces."""
+
+    def test_parse_json_body_is_valid_json(self, sample_collection_dir):
+        """Test that parsed JSON body content is valid JSON."""
+        parser = BruParser()
+        filepath = sample_collection_dir / "users" / "create-user.bru"
+
+        request = parser.parse_file(str(filepath))
+
+        assert request.body is not None
+        assert request.body["type"] == "json"
+        parsed_json = json.loads(request.body["content"])
+        assert parsed_json["name"] == "John Doe"
+        assert parsed_json["email"] == "john@example.com"
+
+    def test_parse_json_body_preserves_all_braces(self, sample_collection_dir):
+        """Test that all opening and closing braces are preserved in body content."""
+        parser = BruParser()
+        filepath = sample_collection_dir / "users" / "create-user.bru"
+
+        request = parser.parse_file(str(filepath))
+
+        body_content = request.body["content"]
+        
+        opening_braces = body_content.count('{')
+        closing_braces = body_content.count('}')
+        
+        assert opening_braces == closing_braces
+        assert opening_braces >= 1
+
+    def test_parse_json_with_nested_objects(self, sample_collection_dir):
+        """Test parsing JSON with deeply nested objects (3+ levels)."""
+        parser = BruParser()
+        filepath = sample_collection_dir / "posts" / "nested-data.bru"
+
+        request = parser.parse_file(str(filepath))
+
+        assert request.body is not None
+        parsed_json = json.loads(request.body["content"])
+        
+        assert parsed_json["user"]["name"] == "Alice Smith"
+        assert parsed_json["user"]["address"]["city"] == "Portland"
+        assert parsed_json["user"]["address"]["coordinates"]["lat"] == 45.5152
+        assert parsed_json["user"]["preferences"]["notifications"]["email"] is True
+
+    def test_parse_json_with_array_values(self, sample_collection_dir):
+        """Test parsing JSON containing arrays with multiple elements."""
+        parser = BruParser()
+        filepath = sample_collection_dir / "posts" / "nested-data.bru"
+
+        request = parser.parse_file(str(filepath))
+
+        parsed_json = json.loads(request.body["content"])
+        
+        assert isinstance(parsed_json["tags"], list)
+        assert len(parsed_json["tags"]) == 3
+        assert parsed_json["tags"][0] == "premium"
+        assert parsed_json["tags"][2] == "active"
+
+    def test_parse_json_mixed_nesting(self, sample_collection_dir):
+        """Test parsing JSON with mixed nesting (objects in objects, arrays, etc)."""
+        parser = BruParser()
+        filepath = sample_collection_dir / "posts" / "nested-data.bru"
+
+        request = parser.parse_file(str(filepath))
+
+        parsed_json = json.loads(request.body["content"])
+        
+        assert "user" in parsed_json
+        assert "address" in parsed_json["user"]
+        assert "coordinates" in parsed_json["user"]["address"]
+        assert parsed_json["metadata"]["created"] == "2024-01-15"
+

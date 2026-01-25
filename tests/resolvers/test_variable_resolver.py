@@ -2,7 +2,7 @@
 import pytest
 import os
 
-from bruno_mcp.resolver import VariableResolver
+from bruno_mcp.resolvers import VariableResolver
 
 
 class TestSimpleResolution:
