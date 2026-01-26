@@ -1,4 +1,5 @@
 """BruRequest data model for Bruno .bru files."""
+
 from pathlib import Path
 from typing import Optional
 

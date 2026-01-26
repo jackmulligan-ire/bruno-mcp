@@ -3,6 +3,7 @@
 This module provides functionality to parse Bruno API client .bru files
 into structured Python objects.
 """
+
 from pathlib import Path
 from typing import Optional
 
@@ -30,12 +31,12 @@ class BruParser(BaseParser):
         """
         meta = {}
         for line in lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
+            if ":" in line:
+                key, value = line.split(":", 1)
                 key = key.strip()
                 value = value.strip()
 
-                if key == 'seq':
+                if key == "seq":
                     meta[key] = int(value)
                 else:
                     meta[key] = value
@@ -55,15 +56,15 @@ class BruParser(BaseParser):
             BruParseError: If no HTTP method found.
         """
         method_section = next((s for s in sections if s in self.HTTP_METHODS), None)
-        
+
         if not method_section:
             raise BruParseError("No HTTP method found")
-        
+
         for line in sections[method_section]:
-            if line.startswith('url:'):
-                url = line.split('url:', 1)[1].strip()
+            if line.startswith("url:"):
+                url = line.split("url:", 1)[1].strip()
                 return method_section.upper(), url
-        
+
         raise BruParseError("No URL found in method section")
 
     def _parse_key_value_section(self, lines: list[str]) -> dict:
@@ -77,9 +78,9 @@ class BruParser(BaseParser):
         """
         result = {}
         for line in lines:
-            if ':' in line:
+            if ":" in line:
                 # Split on first colon only (values may contain colons)
-                key, value = line.split(':', 1)
+                key, value = line.split(":", 1)
                 result[key.strip()] = value.strip()
 
         return result
@@ -115,18 +116,15 @@ class BruParser(BaseParser):
         Returns:
             Dictionary with 'type' and 'content' keys, or None if no body.
         """
-        body_section = next((s for s in sections if s.startswith('body:')), None)
-        
+        body_section = next((s for s in sections if s.startswith("body:")), None)
+
         if not body_section:
             return None
-        
-        body_type = body_section.split(':', 1)[1]
-        content = '\n'.join(sections[body_section])
-        
-        return {
-            'type': body_type,
-            'content': content
-        }
+
+        body_type = body_section.split(":", 1)[1]
+        content = "\n".join(sections[body_section])
+
+        return {"type": body_type, "content": content}
 
     def _parse_auth(self, sections: dict) -> Optional[dict]:
         """Parse authentication section if present.
@@ -137,15 +135,15 @@ class BruParser(BaseParser):
         Returns:
             Dictionary with auth type and credentials, or None if no auth.
         """
-        auth_section = next((s for s in sections if s.startswith('auth:')), None)
-        
+        auth_section = next((s for s in sections if s.startswith("auth:")), None)
+
         if not auth_section:
             return None
-        
-        auth_type = auth_section.split(':', 1)[1]
+
+        auth_type = auth_section.split(":", 1)[1]
         auth_dict = self._parse_key_value_section(sections[auth_section])
-        auth_dict['type'] = auth_type
-        
+        auth_dict["type"] = auth_type
+
         return auth_dict
 
     def parse_file(self, filepath: str) -> BruRequest:
@@ -165,7 +163,7 @@ class BruParser(BaseParser):
         if not path.exists():
             raise FileNotFoundError(f"File not found: {filepath}")
 
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
 
         if not content.strip():
@@ -188,5 +186,5 @@ class BruParser(BaseParser):
             params=params,
             headers=headers,
             body=body,
-            auth=auth
+            auth=auth,
         )

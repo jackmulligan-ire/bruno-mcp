@@ -1,4 +1,5 @@
 """Tests for variable resolver - resolves {{variable}} placeholders."""
+
 import pytest
 import os
 
@@ -26,10 +27,7 @@ class TestSimpleResolution:
 
     def test_resolve_variable_in_url(self):
         """Test resolving multiple variables in URL."""
-        resolver = VariableResolver(variables={
-            "baseUrl": "http://localhost:3000",
-            "userId": "123"
-        })
+        resolver = VariableResolver(variables={"baseUrl": "http://localhost:3000", "userId": "123"})
 
         result = resolver.resolve("{{baseUrl}}/users/{{userId}}")
 
@@ -60,10 +58,8 @@ class TestPrecedenceAndOverriding:
         """Test that environment vars take precedence over collection vars."""
         collection_vars = {"baseUrl": "https://api.example.com"}
         environment_vars = {"baseUrl": "http://localhost:3000"}
-        
-        resolver = VariableResolver(
-            variables={**collection_vars, **environment_vars}
-        )
+
+        resolver = VariableResolver(variables={**collection_vars, **environment_vars})
 
         result = resolver.resolve("{{baseUrl}}")
 
@@ -71,12 +67,14 @@ class TestPrecedenceAndOverriding:
 
     def test_resolve_with_multiple_layers(self):
         """Test resolution with collection + environment + multiple variables."""
-        resolver = VariableResolver(variables={
-            "defaultTimeout": "5000",
-            "baseUrl": "http://localhost:3000",
-            "userId": "123",
-            "apiVersion": "v1"
-        })
+        resolver = VariableResolver(
+            variables={
+                "defaultTimeout": "5000",
+                "baseUrl": "http://localhost:3000",
+                "userId": "123",
+                "apiVersion": "v1",
+            }
+        )
 
         result = resolver.resolve("{{baseUrl}}/{{apiVersion}}/users/{{userId}}")
 
@@ -88,11 +86,13 @@ class TestAdvancedFeatures:
 
     def test_resolve_nested_variables(self):
         """Test resolving nested variable references like {{urls.{{env}}}}."""
-        resolver = VariableResolver(variables={
-            "env": "local",
-            "urls.local": "http://localhost:3000",
-            "urls.prod": "https://api.example.com"
-        })
+        resolver = VariableResolver(
+            variables={
+                "env": "local",
+                "urls.local": "http://localhost:3000",
+                "urls.prod": "https://api.example.com",
+            }
+        )
 
         result = resolver.resolve("{{urls.{{env}}}}")
 
@@ -101,9 +101,7 @@ class TestAdvancedFeatures:
     def test_resolve_process_env_variable(self):
         """Test resolving {{process.env.VAR}} from system environment."""
         os.environ["TEST_SECRET_TOKEN"] = "secret123"
-        resolver = VariableResolver(variables={
-            "authToken": "{{process.env.TEST_SECRET_TOKEN}}"
-        })
+        resolver = VariableResolver(variables={"authToken": "{{process.env.TEST_SECRET_TOKEN}}"})
 
         result = resolver.resolve("Bearer {{authToken}}")
 
@@ -120,7 +118,7 @@ class TestErrorHandling:
 
         with pytest.raises(Exception) as exc_info:
             resolver.resolve("{{baseUrl}}/users/{{userId}}")
-        
+
         assert "baseUrl" in str(exc_info.value)
 
 
@@ -130,21 +128,14 @@ class TestIntegration:
     def test_resolve_entire_bru_request(self, sample_collection_dir):
         """Test resolving all fields of a BruRequest with precedence."""
         from bruno_mcp.parsers import BruParser
-        
+
         parser = BruParser()
-        request = parser.parse_file(
-            str(sample_collection_dir / "users" / "get-user.bru")
-        )
-        
-        resolver = VariableResolver(variables={
-            "userId": "123",
-            "authToken": "abc123"
-        })
+        request = parser.parse_file(str(sample_collection_dir / "users" / "get-user.bru"))
+
+        resolver = VariableResolver(variables={"userId": "123", "authToken": "abc123"})
 
         resolved_url = resolver.resolve(request.url)
-        resolved_auth_header = resolver.resolve(
-            request.headers.get("Authorization", "")
-        )
+        resolved_auth_header = resolver.resolve(request.headers.get("Authorization", ""))
 
         assert resolved_url == "https://api.example.com/users/123"
         assert resolved_auth_header == "Bearer abc123"

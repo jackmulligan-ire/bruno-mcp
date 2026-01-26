@@ -1,4 +1,5 @@
 """Tests for MCP server resources and tools."""
+
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,7 @@ class TestCollectionTreeResource:
     def test_resource_registered_with_correct_uri(self):
         """Test _register_resources calls mcp.resource() with bruno://collection."""
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=Path("/test"),
             bru_parser=Mock(spec=BruParser),
             env_parser=Mock(),
@@ -53,7 +54,7 @@ class TestCollectionTreeResource:
         ]
         mock_scanner.scan_collection.return_value = expected_requests
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=Path("/test"),
             bru_parser=Mock(spec=BruParser),
             env_parser=Mock(),
@@ -84,7 +85,7 @@ class TestCollectionTreeResource:
             )
         ]
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=Path("/test"),
             bru_parser=Mock(spec=BruParser),
             env_parser=Mock(),
@@ -112,10 +113,12 @@ class TestServerCreate:
     @patch("bruno_mcp.server.BruParser")
     @patch("bruno_mcp.server.CollectionScanner")
     @patch("bruno_mcp.server.FastMCP")
-    def test_create_initializes_with_env_path(self, mock_fastmcp, mock_scanner_class, mock_parser_class, sample_collection_dir):
+    def test_create_initializes_with_env_path(
+        self, mock_fastmcp, mock_scanner_class, mock_parser_class, sample_collection_dir
+    ):
         """Test MCPServer.create() reads BRUNO_COLLECTION_PATH from environment."""
         mock_parser_instance = mock_parser_class.return_value
-        
+
         server = MCPServer.create()
 
         assert server._collection_path.resolve() == sample_collection_dir
@@ -130,13 +133,147 @@ class TestServerCreate:
             MCPServer.create()
 
 
+class TestListRequestsTool:
+    """Test list_requests MCP tool registration and handler."""
+
+    def test_list_requests_handler_callable(self):
+        """Test list_requests handler is registered and callable."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = []
+        mock_mcp = Mock()
+
+        MCPServer(
+            collection_path=Path("/test"),
+            bru_parser=Mock(spec=BruParser),
+            env_parser=Mock(),
+            executor=Mock(),
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+
+        assert mock_mcp.tool.call_count == 2
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        list_requests_handler = all_calls[1][0][0]
+        assert callable(list_requests_handler)
+        assert list_requests_handler.__name__ == "list_requests"
+
+    def test_list_requests_returns_expected_endpoints(self):
+        """Test list_requests returns all requests from collection."""
+        mock_scanner = Mock()
+        expected_requests = [
+            RequestMetadata(
+                id="users/get-user",
+                name="Get User",
+                method="GET",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/get-user.bru",
+            ),
+            RequestMetadata(
+                id="posts/create-post",
+                name="Create Post",
+                method="POST",
+                url="https://api.example.com/posts",
+                file_path="posts/create-post.bru",
+            ),
+            RequestMetadata(
+                id="posts/list-posts",
+                name="List Posts",
+                method="GET",
+                url="https://api.example.com/posts",
+                file_path="posts/list-posts.bru",
+            ),
+        ]
+        mock_scanner.scan_collection.return_value = expected_requests
+        mock_mcp = Mock()
+
+        MCPServer(
+            collection_path=Path("/test"),
+            bru_parser=Mock(spec=BruParser),
+            env_parser=Mock(),
+            executor=Mock(),
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args[0][0]
+
+        result = handler()
+
+        assert len(result) == 3
+        assert result[0]["id"] == "users/get-user"
+        assert result[1]["id"] == "posts/create-post"
+        assert result[2]["id"] == "posts/list-posts"
+
+    def test_list_requests_returns_complete_endpoint_metadata(self):
+        """Test each endpoint includes all required metadata fields."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="users/delete-user",
+                name="Delete User",
+                method="DELETE",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/delete-user.bru",
+            )
+        ]
+        mock_mcp = Mock()
+
+        MCPServer(
+            collection_path=Path("/test"),
+            bru_parser=Mock(spec=BruParser),
+            env_parser=Mock(),
+            executor=Mock(),
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args[0][0]
+
+        result = handler()
+
+        endpoint = result[0]
+        assert endpoint["id"] == "users/delete-user"
+        assert endpoint["name"] == "Delete User"
+        assert endpoint["method"] == "DELETE"
+        assert endpoint["url"] == "https://api.example.com/users/{{userId}}"
+        assert endpoint["file_path"] == "users/delete-user.bru"
+        assert "{{userId}}" in endpoint["url"]
+
+    def test_list_requests_handles_empty_collection(self):
+        """Test list_requests returns empty list when collection is empty."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = []
+        mock_mcp = Mock()
+
+        MCPServer(
+            collection_path=Path("/empty"),
+            bru_parser=Mock(spec=BruParser),
+            env_parser=Mock(),
+            executor=Mock(),
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args[0][0]
+
+        result = handler()
+
+        assert result == []
+        assert isinstance(result, list)
+
+
 class TestRunBrunoRequestTool:
     """Test run_bruno_request MCP tool registration and handler."""
 
     def test_tool_registered_with_correct_name(self):
-        """Test _register_tools calls mcp.tool() with bruno://request_by_id."""
+        """Test _register_tools calls mcp.tool() for run_request_by_id."""
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=Path("/test"),
             bru_parser=Mock(spec=BruParser),
             env_parser=Mock(),
@@ -145,7 +282,11 @@ class TestRunBrunoRequestTool:
             scanner=Mock(),
             mcp=mock_mcp,
         )
-        mock_mcp.tool.assert_called_once_with()
+        assert mock_mcp.tool.call_count == 2
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        run_request_handler = all_calls[0][0][0]
+        assert run_request_handler.__name__ == "run_request_by_id"
 
     def test_tool_executes_request_by_id(self, sample_collection_dir):
         """Test tool handler executes request by ID and returns response."""
@@ -171,8 +312,11 @@ class TestRunBrunoRequestTool:
             auth=None,
         )
         mock_env_parser = Mock(spec=EnvParser)
-        mock_env_parser.load_environment.return_value = {"baseUrl": "https://api.example.com", "userId": "123"}
-        mock_resolver = Mock(spec=VariableResolver)
+        mock_env_parser.load_environment.return_value = {
+            "baseUrl": "https://api.example.com",
+            "userId": "123",
+        }
+        Mock(spec=VariableResolver)
         mock_executor = Mock(spec=RequestExecutor)
         mock_executor.execute.return_value = BruResponse(
             status=200,
@@ -180,7 +324,7 @@ class TestRunBrunoRequestTool:
             body='{"id": "123", "name": "John"}',
         )
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=sample_collection_dir,
             bru_parser=mock_parser,
             env_parser=mock_env_parser,
@@ -190,8 +334,9 @@ class TestRunBrunoRequestTool:
             mcp=mock_mcp,
         )
         tool_decorator = mock_mcp.tool.return_value
-        handler = tool_decorator.call_args[0][0]
-        
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
         result = handler(request_id="users/get-user")
 
         assert result["status"] == 200
@@ -207,7 +352,9 @@ class TestRunBrunoRequestTool:
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")
     @patch("bruno_mcp.server.RequestExecutor")
-    def test_tool_applies_parameter_overrides(self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir):
+    def test_tool_applies_parameter_overrides(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
         """Test tool applies optional parameter overrides to request."""
         mock_scanner = Mock()
         mock_scanner.scan_collection.return_value = [
@@ -233,11 +380,10 @@ class TestRunBrunoRequestTool:
         mock_env_parser = mock_env_parser_class.return_value
         mock_env_parser.parse_collection.return_value = {}
         mock_env_parser.parse_environment.return_value = {}
-        mock_resolver = mock_resolver_class.return_value
         mock_executor = mock_executor_class.return_value
         mock_executor.execute.return_value = BruResponse(status=200, headers={}, body="[]")
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=sample_collection_dir,
             bru_parser=mock_parser,
             env_parser=mock_env_parser,
@@ -260,7 +406,9 @@ class TestRunBrunoRequestTool:
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")
     @patch("bruno_mcp.server.RequestExecutor")
-    def test_tool_applies_body_override(self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir):
+    def test_tool_applies_body_override(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
         """Test tool applies optional body override to request."""
         mock_scanner = Mock()
         mock_scanner.scan_collection.return_value = [
@@ -286,11 +434,12 @@ class TestRunBrunoRequestTool:
         mock_env_parser = mock_env_parser_class.return_value
         mock_env_parser.parse_collection.return_value = {}
         mock_env_parser.parse_environment.return_value = {}
-        mock_resolver = mock_resolver_class.return_value
         mock_executor = mock_executor_class.return_value
-        mock_executor.execute.return_value = BruResponse(status=201, headers={}, body='{"id": "456"}')
+        mock_executor.execute.return_value = BruResponse(
+            status=201, headers={}, body='{"id": "456"}'
+        )
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=sample_collection_dir,
             bru_parser=mock_parser,
             env_parser=mock_env_parser,
@@ -316,7 +465,9 @@ class TestRunBrunoRequestTool:
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")
     @patch("bruno_mcp.server.RequestExecutor")
-    def test_tool_raises_error_for_invalid_request_id(self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir):
+    def test_tool_raises_error_for_invalid_request_id(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
         """Test tool raises error when request_id not found in collection."""
         mock_scanner = Mock()
         mock_scanner.scan_collection.return_value = [
@@ -330,10 +481,9 @@ class TestRunBrunoRequestTool:
         ]
         mock_parser = Mock(spec=BruParser)
         mock_env_parser = mock_env_parser_class.return_value
-        mock_resolver = mock_resolver_class.return_value
         mock_executor = mock_executor_class.return_value
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=sample_collection_dir,
             bru_parser=mock_parser,
             env_parser=mock_env_parser,
@@ -352,7 +502,9 @@ class TestRunBrunoRequestTool:
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")
     @patch("bruno_mcp.server.RequestExecutor")
-    def test_tool_loads_collection_and_environment_variables(self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir):
+    def test_tool_loads_collection_and_environment_variables(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
         """Test tool loads collection and environment variables correctly."""
         mock_scanner = Mock()
         mock_scanner.scan_collection.return_value = [
@@ -376,13 +528,15 @@ class TestRunBrunoRequestTool:
             auth=None,
         )
         mock_env_parser = mock_env_parser_class.return_value
-        mock_env_parser.parse_collection.return_value = {"baseUrl": "https://api.example.com", "apiKey": "collection-key"}
+        mock_env_parser.parse_collection.return_value = {
+            "baseUrl": "https://api.example.com",
+            "apiKey": "collection-key",
+        }
         mock_env_parser.parse_environment.return_value = {"userId": "123", "apiKey": "env-key"}
-        mock_resolver = mock_resolver_class.return_value
         mock_executor = mock_executor_class.return_value
         mock_executor.execute.return_value = BruResponse(status=200, headers={}, body="{}")
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=sample_collection_dir,
             bru_parser=mock_parser,
             env_parser=mock_env_parser,
@@ -396,7 +550,9 @@ class TestRunBrunoRequestTool:
 
         handler(request_id="users/get-user")
 
-        mock_env_parser.parse_collection.assert_called_once_with(sample_collection_dir / "bruno.json")
+        mock_env_parser.parse_collection.assert_called_once_with(
+            sample_collection_dir / "bruno.json"
+        )
         mock_env_parser.parse_environment.assert_called_once()
         mock_resolver_class.assert_called_once()
         resolver_vars = mock_resolver_class.call_args[0][0]
@@ -408,7 +564,9 @@ class TestRunBrunoRequestTool:
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")
     @patch("bruno_mcp.server.RequestExecutor")
-    def test_tool_resolves_variables_before_execution(self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir):
+    def test_tool_resolves_variables_before_execution(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
         """Test tool resolves variables in URL, headers, params, and body before execution."""
         mock_scanner = Mock()
         mock_scanner.scan_collection.return_value = [
@@ -433,7 +591,11 @@ class TestRunBrunoRequestTool:
         )
         mock_env_parser = mock_env_parser_class.return_value
         mock_env_parser.parse_collection.return_value = {"baseUrl": "https://api.example.com"}
-        mock_env_parser.parse_environment.return_value = {"userId": "123", "includeFields": "profile,posts", "authToken": "secret-token"}
+        mock_env_parser.parse_environment.return_value = {
+            "userId": "123",
+            "includeFields": "profile,posts",
+            "authToken": "secret-token",
+        }
         mock_resolver = mock_resolver_class.return_value
         mock_resolver.resolve.side_effect = lambda x: {
             "https://api.example.com/users/{{userId}}": "https://api.example.com/users/123",
@@ -443,7 +605,7 @@ class TestRunBrunoRequestTool:
         mock_executor = mock_executor_class.return_value
         mock_executor.execute.return_value = BruResponse(status=200, headers={}, body="{}")
         mock_mcp = Mock()
-        server = MCPServer(
+        MCPServer(
             collection_path=sample_collection_dir,
             bru_parser=mock_parser,
             env_parser=mock_env_parser,

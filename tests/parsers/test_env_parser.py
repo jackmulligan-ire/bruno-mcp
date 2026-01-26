@@ -1,7 +1,5 @@
 """Tests for environment parser - parses bruno.json and environment .bru files."""
-import pytest
-import json
-from pathlib import Path
+
 
 from bruno_mcp.parsers import EnvParser
 
@@ -67,7 +65,7 @@ class TestCombinedLoading:
 
         variables = parser.load_environment(
             collection_path=str(sample_collection_dir / "bruno.json"),
-            environment_path=str(sample_collection_dir / "environments" / "local.bru")
+            environment_path=str(sample_collection_dir / "environments" / "local.bru"),
         )
 
         assert "defaultTimeout" in variables
@@ -80,7 +78,7 @@ class TestCombinedLoading:
 
         variables = parser.load_environment(
             collection_path=str(sample_collection_dir / "bruno.json"),
-            environment_path=str(sample_collection_dir / "environments" / "local.bru")
+            environment_path=str(sample_collection_dir / "environments" / "local.bru"),
         )
 
         assert variables["baseUrl"] == "http://localhost:3000"

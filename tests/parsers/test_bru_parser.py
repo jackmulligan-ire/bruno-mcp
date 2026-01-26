@@ -1,4 +1,5 @@
 """Tests for BruParser - Bruno .bru file parser."""
+
 import json
 import pytest
 
@@ -194,10 +195,10 @@ class TestBruParserBodyParsing:
         request = parser.parse_file(str(filepath))
 
         body_content = request.body["content"]
-        
-        opening_braces = body_content.count('{')
-        closing_braces = body_content.count('}')
-        
+
+        opening_braces = body_content.count("{")
+        closing_braces = body_content.count("}")
+
         assert opening_braces == closing_braces
         assert opening_braces >= 1
 
@@ -210,7 +211,7 @@ class TestBruParserBodyParsing:
 
         assert request.body is not None
         parsed_json = json.loads(request.body["content"])
-        
+
         assert parsed_json["user"]["name"] == "Alice Smith"
         assert parsed_json["user"]["address"]["city"] == "Portland"
         assert parsed_json["user"]["address"]["coordinates"]["lat"] == 45.5152
@@ -224,7 +225,7 @@ class TestBruParserBodyParsing:
         request = parser.parse_file(str(filepath))
 
         parsed_json = json.loads(request.body["content"])
-        
+
         assert isinstance(parsed_json["tags"], list)
         assert len(parsed_json["tags"]) == 3
         assert parsed_json["tags"][0] == "premium"
@@ -238,9 +239,8 @@ class TestBruParserBodyParsing:
         request = parser.parse_file(str(filepath))
 
         parsed_json = json.loads(request.body["content"])
-        
+
         assert "user" in parsed_json
         assert "address" in parsed_json["user"]
         assert "coordinates" in parsed_json["user"]["address"]
         assert parsed_json["metadata"]["created"] == "2024-01-15"
-

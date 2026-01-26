@@ -15,6 +15,7 @@ class MCPServer:
     and executing Bruno API requests. Scans a Bruno collection directory for
     .bru files and exposes them as MCP resources and executable tools.
     """
+
     def __init__(
         self,
         collection_path: Path,
@@ -76,7 +77,7 @@ class MCPServer:
             executor=RequestExecutor(),
             resolver_cls=VariableResolver,
             scanner=CollectionScanner(bru_parser),
-            mcp=FastMCP("bruno-mcp")
+            mcp=FastMCP("bruno-mcp"),
         )
 
     def _register_resources(self):
@@ -85,16 +86,18 @@ class MCPServer:
         Registers the collection_tree resource that provides metadata
         for all requests in the Bruno collection.
         """
+
         @self._mcp.resource("bruno://collection")
         def collection_tree():
-            return [request.model_dump() for request in self._collection_metadata]  
+            return [request.model_dump() for request in self._collection_metadata]
 
     def _register_tools(self):
         """Register MCP tools with the FastMCP instance.
 
-        Registers the run_request_by_id tool that executes a Bruno
-        request by its ID and returns the HTTP response.
+        Registers tools for listing available requests and executing
+        them by ID.
         """
+
         @self._mcp.tool()
         def run_request_by_id(request_id: str, environment_name: str | None = None):
             """Execute a Bruno request by ID.
@@ -115,14 +118,38 @@ class MCPServer:
                 raise ValueError(f"Request not found: {request_id}")
 
             # Load the variables
-            env_path = str(self._collection_path / "environments" / f"{environment_name}.bru") if environment_name else None
-            variables = self._env_parser.load_environment(collection_path=str(self._collection_path / "bruno.json"), environment_path=env_path)
-            
+            env_path = (
+                str(self._collection_path / "environments" / f"{environment_name}.bru")
+                if environment_name
+                else None
+            )
+            variables = self._env_parser.load_environment(
+                collection_path=str(self._collection_path / "bruno.json"), environment_path=env_path
+            )
+
             # Construct full path and parse
             full_path = self._collection_path / metadata.file_path
             request = self._bru_parser.parse_file(str(full_path))
-            
+
             # Execute the request
             response = self._executor.execute(request, self._resolver_cls(variables))
             # Return the response
             return response.model_dump()
+
+        @self._mcp.tool()
+        def list_requests():
+            """List all available Bruno requests in the collection.
+
+            Returns a list of all discovered requests with their metadata including
+            ID, name, HTTP method, URL (with variable placeholders), and file path.
+            This allows MCP clients to discover available endpoints before execution.
+
+            Returns:
+                List of dictionaries containing request metadata. Each dictionary includes:
+                    - id: Unique identifier (relative path without .bru extension)
+                    - name: Human-readable request name
+                    - method: HTTP method (GET, POST, PUT, DELETE, etc.)
+                    - url: Request URL (may contain {{variable}} placeholders)
+                    - file_path: Relative path to the .bru file
+            """
+            return [request.model_dump() for request in self._collection_metadata]

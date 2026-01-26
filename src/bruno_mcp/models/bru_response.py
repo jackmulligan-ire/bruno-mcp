@@ -1,4 +1,5 @@
 """BruResponse data model for HTTP responses."""
+
 from pydantic import BaseModel
 
 

@@ -1,4 +1,5 @@
 """Environment parser for Bruno collection and environment files."""
+
 import json
 from pathlib import Path
 from typing import Optional
@@ -14,8 +15,8 @@ class EnvParser(BaseParser):
         """Parse vars or vars:secret section into dictionary."""
         result = {}
         for line in lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
+            if ":" in line:
+                key, value = line.split(":", 1)
                 result[key.strip()] = value.strip()
         return result
 
@@ -37,7 +38,7 @@ class EnvParser(BaseParser):
             raise FileNotFoundError(f"Collection file not found: {filepath}")
 
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data
         except json.JSONDecodeError as e:
@@ -60,7 +61,7 @@ class EnvParser(BaseParser):
         if not path.exists():
             raise FileNotFoundError(f"Environment file not found: {filepath}")
 
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
 
         if not content.strip():
@@ -79,9 +80,7 @@ class EnvParser(BaseParser):
         return result
 
     def load_environment(
-        self,
-        collection_path: Optional[str] = None,
-        environment_path: Optional[str] = None
+        self, collection_path: Optional[str] = None, environment_path: Optional[str] = None
     ) -> dict:
         """Load and merge variables from collection and environment files.
 

@@ -6,6 +6,7 @@ parsed request data (headers, params, body, auth), RequestMetadata only
 contains essential identifying information needed to locate and reference
 a request within a collection.
 """
+
 from pydantic import BaseModel
 
 

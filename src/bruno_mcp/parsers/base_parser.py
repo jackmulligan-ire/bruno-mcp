@@ -1,4 +1,5 @@
 """Base parser with common functionality for Bruno file parsing."""
+
 from bruno_mcp.models import BruParseError
 
 
@@ -18,7 +19,7 @@ class BaseParser:
             BruParseError: If braces are unmatched.
         """
         sections = {}
-        lines = content.split('\n')
+        lines = content.split("\n")
         current_section = None
         current_lines: list[str] = []
         brace_count = 0
@@ -26,7 +27,7 @@ class BaseParser:
         for line in lines:
             stripped = line.strip()
 
-            if stripped.endswith('{') and not current_section:
+            if stripped.endswith("{") and not current_section:
                 section_name = stripped[:-1].strip()
                 if section_name:
                     current_section = section_name
@@ -35,10 +36,10 @@ class BaseParser:
                     continue
 
             if current_section:
-                opening_braces = line.count('{')
-                closing_braces = line.count('}')
+                opening_braces = line.count("{")
+                closing_braces = line.count("}")
                 brace_count += opening_braces - closing_braces
-                
+
                 if brace_count == 0:
                     sections[current_section] = current_lines
                     current_section = None

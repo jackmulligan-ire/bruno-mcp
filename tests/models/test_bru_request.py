@@ -1,5 +1,5 @@
 """Tests for BruRequest model."""
-import pytest
+
 
 from bruno_mcp.models import BruRequest
 
@@ -15,7 +15,7 @@ class TestBruRequest:
             method="GET",
             url="https://api.example.com/test",
             params={},
-            headers={}
+            headers={},
         )
 
         name = request.get_name()
@@ -30,7 +30,7 @@ class TestBruRequest:
             method="GET",
             url="https://api.example.com/test",
             params={},
-            headers={}
+            headers={},
         )
 
         name = request.get_name()
