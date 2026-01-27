@@ -24,7 +24,6 @@ class VariableResolver:
 
     def _resolve_process_env(self, text: str) -> str:
         """Resolve {{process.env.VAR}} patterns from system environment."""
-        pattern = r"\{\{process\.env\.([^}]+)\}\}"
 
         def replacer(match):
             env_var = match.group(1)
@@ -33,6 +32,7 @@ class VariableResolver:
                 raise VariableResolutionError(f"Environment variable not found: {env_var}")
             return value
 
+        pattern = r"\{\{process\.env\.([^}]+)\}\}"
         return re.sub(pattern, replacer, text)
 
     def _resolve_single_pass(self, text: str, variables: dict) -> str:
@@ -75,7 +75,7 @@ class VariableResolver:
         if not text or "{{" not in text:
             return text
 
-        resolved_text = text
+        resolved_text = self._resolve_process_env(text)
         resolved_vars = dict(self.variables)
 
         for var_name, var_value in list(resolved_vars.items()):
@@ -97,3 +97,31 @@ class VariableResolver:
                 )
 
         return resolved_text
+
+    def validate_required_variables(self, text: str) -> list[str]:
+        """Validate all required variables are available in self.variables.
+
+        Extracts path parameters from text and checks which ones are missing
+        from the resolver's variables. Excludes {{process.env.*}} patterns.
+
+        Args:
+            text: String containing {{variable}} placeholders.
+
+        Returns:
+            List of missing variable names. Empty list if all variables are available.
+        """
+        if not text or "{{" not in text:
+            return []
+
+        pattern = r"\{\{([^{}]+)\}\}"
+        matches = re.findall(pattern, text)
+
+        required = {
+            match.strip() for match in matches if not match.strip().startswith("process.env.")
+        }
+
+        if not required:
+            return []
+
+        missing = [var for var in required if var not in self.variables]
+        return missing

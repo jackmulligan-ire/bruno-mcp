@@ -139,3 +139,66 @@ class TestIntegration:
 
         assert resolved_url == "https://api.example.com/users/123"
         assert resolved_auth_header == "Bearer abc123"
+
+
+class TestValidateRequiredVariables:
+    """Test validate_required_variables() method."""
+
+    def test_validate_required_variables_all_present(self):
+        """Returns empty list when all required variables exist in resolver."""
+        resolver = VariableResolver(variables={"userId": "123", "groupId": "456"})
+
+        missing = resolver.validate_required_variables(
+            "https://api.com/{{groupId}}/users/{{userId}}"
+        )
+
+        assert missing == []
+
+    def test_validate_required_variables_single_missing(self):
+        """Returns list with single missing variable name."""
+        resolver = VariableResolver(variables={"userId": "123"})
+
+        missing = resolver.validate_required_variables(
+            "https://api.com/{{groupId}}/users/{{userId}}"
+        )
+
+        assert missing == ["groupId"]
+
+    def test_validate_required_variables_multiple_missing(self):
+        """Returns list with all missing variable names."""
+        resolver = VariableResolver(variables={"userId": "123"})
+
+        missing = resolver.validate_required_variables(
+            "https://{{baseUrl}}/{{groupId}}/users/{{userId}}/posts/{{postId}}"
+        )
+
+        assert set(missing) == {"baseUrl", "groupId", "postId"}
+        assert "userId" not in missing
+
+    def test_validate_required_variables_ignores_process_env(self):
+        """Does not require {{process.env.*}} variables to be present."""
+        resolver = VariableResolver(variables={"userId": "123"})
+
+        missing = resolver.validate_required_variables(
+            "https://api.com/users/{{userId}}?token={{process.env.API_TOKEN}}"
+        )
+
+        assert missing == []
+
+    def test_validate_required_variables_no_variables_in_text(self):
+        """Returns empty list when text has no variables."""
+        resolver = VariableResolver(variables={})
+
+        missing = resolver.validate_required_variables("https://api.com/users/123")
+
+        assert missing == []
+
+    def test_validate_required_variables_nested_patterns(self):
+        """Handles nested variable patterns correctly."""
+        resolver = VariableResolver(
+            variables={"env": "local", "urls.local": "http://localhost:3000", "userId": "123"}
+        )
+
+        missing = resolver.validate_required_variables("{{urls.{{env}}}}/users/{{userId}}")
+
+        assert missing == []

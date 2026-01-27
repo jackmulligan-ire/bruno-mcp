@@ -7,10 +7,10 @@ contains essential identifying information needed to locate and reference
 a request within a collection.
 """
 
-from pydantic import BaseModel
+from bruno_mcp.models.base_request import BaseRequest
 
 
-class RequestMetadata(BaseModel):
+class RequestMetadata(BaseRequest):
     """Lightweight metadata for a Bruno request file.
 
     Used for collection scanning and discovery. Contains only essential
@@ -29,5 +29,4 @@ class RequestMetadata(BaseModel):
     id: str
     name: str
     method: str
-    url: str
     file_path: str

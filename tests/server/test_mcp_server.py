@@ -348,6 +348,266 @@ class TestRunBrunoRequestTool:
         assert isinstance(call_args[0][0], BruRequest)
         assert call_args[0][0].method == "GET"
 
+    def test_tool_substitutes_single_path_parameter(self, sample_collection_dir):
+        """Test single path parameter substitution via path_params."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="users/get-user",
+                name="Get User",
+                method="GET",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/get-user.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "users" / "get-user.bru"),
+            meta={"name": "Get User"},
+            method="GET",
+            url="https://api.example.com/users/{{userId}}",
+            params={},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200,
+            headers={},
+            body='{"id": "456"}',
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        result = handler(request_id="users/get-user", path_params={"userId": "456"})
+
+        assert result["status"] == 200
+        mock_executor.execute.assert_called_once()
+        call_args = mock_executor.execute.call_args
+        resolver = call_args[0][1]
+        assert resolver.variables["userId"] == "456"
+
+    def test_tool_substitutes_multiple_path_parameters(self, sample_collection_dir):
+        """Test multiple path parameter substitution via path_params."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="groups/users",
+                name="Get User in Group",
+                method="GET",
+                url="https://api.example.com/{{groupId}}/users/{{userId}}",
+                file_path="groups/users.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "groups" / "users.bru"),
+            meta={"name": "Get User in Group"},
+            method="GET",
+            url="https://api.example.com/{{groupId}}/users/{{userId}}",
+            params={},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200,
+            headers={},
+            body='{"id": "123"}',
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        result = handler(request_id="groups/users", path_params={"groupId": "789", "userId": "123"})
+
+        assert result["status"] == 200
+        mock_executor.execute.assert_called_once()
+        call_args = mock_executor.execute.call_args
+        resolver = call_args[0][1]
+        assert resolver.variables["groupId"] == "789"
+        assert resolver.variables["userId"] == "123"
+
+    def test_tool_path_params_override_environment_variables(self, sample_collection_dir):
+        """Test user-provided path_params override environment variables."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="users/get-user",
+                name="Get User",
+                method="GET",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/get-user.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "users" / "get-user.bru"),
+            meta={"name": "Get User"},
+            method="GET",
+            url="https://api.example.com/users/{{userId}}",
+            params={},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {"userId": "999"}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200,
+            headers={},
+            body='{"id": "456"}',
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        result = handler(request_id="users/get-user", path_params={"userId": "456"})
+
+        assert result["status"] == 200
+        mock_executor.execute.assert_called_once()
+        call_args = mock_executor.execute.call_args
+        resolver = call_args[0][1]
+        assert resolver.variables["userId"] == "456"
+
+    def test_tool_validates_missing_path_parameters(self, sample_collection_dir):
+        """Test error when required path parameters are missing."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="users/get-user",
+                name="Get User",
+                method="GET",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/get-user.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "users" / "get-user.bru"),
+            meta={"name": "Get User"},
+            method="GET",
+            url="https://api.example.com/users/{{userId}}",
+            params={},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {}
+        executor = RequestExecutor()
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        with pytest.raises(ValueError) as exc_info:
+            handler(request_id="users/get-user")
+
+        assert "Missing required path parameters" in str(exc_info.value)
+        assert "userId" in str(exc_info.value)
+
+    def test_tool_handles_path_params_with_existing_env_vars(self, sample_collection_dir):
+        """Test mixing user path_params with existing environment variables."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="groups/users",
+                name="Get User in Group",
+                method="GET",
+                url="https://api.example.com/{{groupId}}/users/{{userId}}",
+                file_path="groups/users.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "groups" / "users.bru"),
+            meta={"name": "Get User in Group"},
+            method="GET",
+            url="https://api.example.com/{{groupId}}/users/{{userId}}",
+            params={},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {"groupId": "100"}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200,
+            headers={},
+            body='{"id": "123"}',
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        result = handler(request_id="groups/users", path_params={"userId": "123"})
+
+        assert result["status"] == 200
+        mock_executor.execute.assert_called_once()
+        call_args = mock_executor.execute.call_args
+        resolver = call_args[0][1]
+        assert resolver.variables["groupId"] == "100"
+        assert resolver.variables["userId"] == "123"
+
     @pytest.mark.skip
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")

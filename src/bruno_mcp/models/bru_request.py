@@ -3,16 +3,15 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel
+from bruno_mcp.models.base_request import BaseRequest
 
 
-class BruRequest(BaseModel):
+class BruRequest(BaseRequest):
     """Pydantic model representing a parsed .bru file."""
 
     filepath: str
     meta: dict  # {name, type, seq}
     method: str  # GET, POST, etc.
-    url: str
     params: dict  # Query parameters
     headers: dict
     body: Optional[dict] = None  # {type: "json|form|multipart", content: "..."}
@@ -24,7 +23,8 @@ class BruRequest(BaseModel):
         Returns:
             Request name from meta, or 'Unnamed Request' if not found.
         """
-        return self.meta.get("name", "Unnamed Request")
+        name = self.meta.get("name", "Unnamed Request")
+        return str(name) if name else "Unnamed Request"
 
     def get_request_id(self) -> str:
         """Generate request ID from filepath.

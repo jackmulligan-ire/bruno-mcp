@@ -21,8 +21,20 @@ class RequestExecutor:
             BruResponse with status, headers, and body.
 
         Raises:
+            ValueError: If required path parameters are missing.
             httpx.HTTPError: For network/connection errors.
         """
+        required_params = request.extract_path_parameters()
+        if required_params:
+            missing = resolver.validate_required_variables(request.url)
+            if missing:
+                missing_list = ", ".join(sorted(missing))
+                required_list = ", ".join(sorted(required_params))
+                raise ValueError(
+                    f"Missing required path parameters: {missing_list}. "
+                    f"Required: {required_list}"
+                )
+
         resolved_url = resolver.resolve(request.url)
 
         resolved_headers = {key: resolver.resolve(value) for key, value in request.headers.items()}

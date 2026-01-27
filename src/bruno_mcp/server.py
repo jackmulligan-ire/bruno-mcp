@@ -99,12 +99,20 @@ class MCPServer:
         """
 
         @self._mcp.tool()
-        def run_request_by_id(request_id: str, environment_name: str | None = None):
+        def run_request_by_id(
+            request_id: str,
+            environment_name: str | None = None,
+            path_params: dict[str, str] | None = None,
+        ):
             """Execute a Bruno request by ID.
 
             Args:
                 request_id: Identifier of the request to execute.
                 environment_name: Optional environment name to load variables from.
+                path_params: Optional dictionary of URL path parameters to substitute.
+                           These override environment variables with the same name.
+                           Example: {"userId": "123", "groupId": "456"} for URLs like
+                           "/users/{{userId}}" or "/{{groupId}}/users/{{userId}}".
 
             Returns:
                 Dictionary containing the HTTP response (status, headers, body).
@@ -127,12 +135,17 @@ class MCPServer:
                 collection_path=str(self._collection_path / "bruno.json"), environment_path=env_path
             )
 
+            # Merge variables: env vars first, then user path_params override
+            merged_variables = {**variables}
+            if path_params:
+                merged_variables.update(path_params)
+
             # Construct full path and parse
             full_path = self._collection_path / metadata.file_path
             request = self._bru_parser.parse_file(str(full_path))
 
             # Execute the request
-            response = self._executor.execute(request, self._resolver_cls(variables))
+            response = self._executor.execute(request, self._resolver_cls(merged_variables))
             # Return the response
             return response.model_dump()
 
