@@ -666,65 +666,6 @@ class TestRunBrunoRequestTool:
     @patch("bruno_mcp.server.EnvParser")
     @patch("bruno_mcp.server.VariableResolver")
     @patch("bruno_mcp.server.RequestExecutor")
-    def test_tool_applies_body_override(
-        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
-    ):
-        """Test tool applies optional body override to request."""
-        mock_scanner = Mock()
-        mock_scanner.scan_collection.return_value = [
-            RequestMetadata(
-                id="users/create-user",
-                name="Create User",
-                method="POST",
-                url="https://api.example.com/users",
-                file_path="users/create-user.bru",
-            )
-        ]
-        mock_parser = Mock(spec=BruParser)
-        mock_parser.parse_file.return_value = BruRequest(
-            filepath=str(sample_collection_dir / "users" / "create-user.bru"),
-            meta={"name": "Create User"},
-            method="POST",
-            url="https://api.example.com/users",
-            params={},
-            headers={"Content-Type": "application/json"},
-            body={"type": "json", "content": '{"name": "John", "email": "john@example.com"}'},
-            auth=None,
-        )
-        mock_env_parser = mock_env_parser_class.return_value
-        mock_env_parser.parse_collection.return_value = {}
-        mock_env_parser.parse_environment.return_value = {}
-        mock_executor = mock_executor_class.return_value
-        mock_executor.execute.return_value = BruResponse(
-            status=201, headers={}, body='{"id": "456"}'
-        )
-        mock_mcp = Mock()
-        MCPServer(
-            collection_path=sample_collection_dir,
-            bru_parser=mock_parser,
-            env_parser=mock_env_parser,
-            executor=mock_executor,
-            resolver_cls=VariableResolver,
-            scanner=mock_scanner,
-            mcp=mock_mcp,
-        )
-        tool_decorator = mock_mcp.tool.return_value
-        handler = tool_decorator.call_args[0][0]
-        override_body = {"name": "Jane", "email": "jane@example.com"}
-
-        handler(request_id="users/create-user", body=override_body)
-
-        call_args = mock_executor.execute.call_args
-        request = call_args[0][0]
-        assert request.body["type"] == "json"
-        body_content = json.loads(request.body["content"])
-        assert body_content["name"] == "Jane"
-        assert body_content["email"] == "jane@example.com"
-
-    @pytest.mark.skip
-    @patch("bruno_mcp.server.EnvParser")
-    @patch("bruno_mcp.server.VariableResolver")
-    @patch("bruno_mcp.server.RequestExecutor")
     def test_tool_raises_error_for_invalid_request_id(
         self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
     ):
@@ -882,3 +823,120 @@ class TestRunBrunoRequestTool:
         assert mock_resolver.resolve.called
         call_args = mock_executor.execute.call_args
         assert call_args is not None
+
+
+class TestBodyParameter:
+    """Test body parameter functionality"""
+
+    @patch("bruno_mcp.server.EnvParser")
+    @patch("bruno_mcp.server.VariableResolver")
+    @patch("bruno_mcp.server.RequestExecutor")
+    def test_tool_applies_body_override(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
+        """Test tool applies optional body override to request."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="users/create-user",
+                name="Create User",
+                method="POST",
+                url="https://api.example.com/users",
+                file_path="users/create-user.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "users" / "create-user.bru"),
+            meta={"name": "Create User"},
+            method="POST",
+            url="https://api.example.com/users",
+            params={},
+            headers={"Content-Type": "application/json"},
+            body={"type": "json", "content": '{"name": "John", "email": "john@example.com"}'},
+            auth=None,
+        )
+        mock_env_parser = mock_env_parser_class.return_value
+        mock_env_parser.parse_collection.return_value = {}
+        mock_env_parser.parse_environment.return_value = {}
+        mock_executor = mock_executor_class.return_value
+        mock_executor.execute.return_value = BruResponse(
+            status=201, headers={}, body='{"id": "456"}'
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+        override_body = {"name": "Jane", "email": "jane@example.com"}
+
+        handler(request_id="users/create-user", body=override_body)
+
+        call_args = mock_executor.execute.call_args
+        request = call_args[0][0]
+        assert request.body["type"] == "json"
+        body_content = json.loads(request.body["content"])
+        assert body_content["name"] == "Jane"
+        assert body_content["email"] == "jane@example.com"
+
+    def test_tool_body_parameter_adds_body_when_none_exists(self, sample_collection_dir):
+        """Test body parameter adds body when .bru file has no body."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="posts/create-post",
+                name="Create Post",
+                method="POST",
+                url="https://api.example.com/posts",
+                file_path="posts/create-post.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "posts" / "create-post.bru"),
+            meta={"name": "Create Post"},
+            method="POST",
+            url="https://api.example.com/posts",
+            params={},
+            headers={"Content-Type": "application/json"},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=201, headers={}, body='{"id": "789"}'
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+        new_body = {"title": "My Post", "content": "Post content"}
+
+        handler(request_id="posts/create-post", body=new_body)
+
+        call_args = mock_executor.execute.call_args
+        request = call_args[0][0]
+        assert request.body is not None
+        assert request.body["type"] == "json"
+        body_content = json.loads(request.body["content"])
+        assert body_content["title"] == "My Post"
+        assert body_content["content"] == "Post content"

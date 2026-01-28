@@ -1,5 +1,7 @@
 from pathlib import Path
 import os
+import json
+from typing import Any
 
 from bruno_mcp.executors import RequestExecutor
 from bruno_mcp.parsers import BruParser, EnvParser
@@ -103,6 +105,7 @@ class MCPServer:
             request_id: str,
             environment_name: str | None = None,
             path_params: dict[str, str] | None = None,
+            body: dict[str, Any] | None = None,
         ):
             """Execute a Bruno request by ID.
 
@@ -113,6 +116,9 @@ class MCPServer:
                            These override environment variables with the same name.
                            Example: {"userId": "123", "groupId": "456"} for URLs like
                            "/users/{{userId}}" or "/{{groupId}}/users/{{userId}}".
+                body: Optional dictionary to override the request body from the .bru file.
+                     The body will be converted to JSON format and supports variable resolution.
+                     Example: {"name": "John", "email": "{{email}}"}.
 
             Returns:
                 Dictionary containing the HTTP response (status, headers, body).
@@ -143,6 +149,11 @@ class MCPServer:
             # Construct full path and parse
             full_path = self._collection_path / metadata.file_path
             request = self._bru_parser.parse_file(str(full_path))
+
+            # Override body if provided
+            if body is not None:
+                json_string = json.dumps(body)
+                request.body = {"type": "json", "content": json_string}
 
             # Execute the request
             response = self._executor.execute(request, self._resolver_cls(merged_variables))
