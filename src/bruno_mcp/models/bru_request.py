@@ -1,7 +1,8 @@
 """BruRequest data model for Bruno .bru files."""
 
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from bruno_mcp.models.base_request import BaseRequest
 
@@ -38,3 +39,25 @@ class BruRequest(BaseRequest):
         path = Path(self.filepath)
         # path.stem is already a str, but explicit for type safety
         return path.stem
+
+    def with_overrides(
+        self,
+        body: dict[str, Any] | None = None,
+        query_params: dict[str, Any] | None = None,
+    ) -> "BruRequest":
+        """Return a new BruRequest with body and/or query_params overridden.
+
+        Args:
+            body: Optional dictionary to override the request body.
+            query_params: Optional dictionary to override query parameters.
+
+        Returns:
+            New BruRequest instance with overrides applied.
+        """
+        updates = {}
+        if query_params is not None:
+            updates["params"] = {**self.params, **query_params}
+        if body is not None:
+            updates["body"] = {"type": "json", "content": json.dumps(body)}
+
+        return self.model_copy(update=updates)

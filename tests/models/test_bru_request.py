@@ -1,5 +1,7 @@
 """Tests for BruRequest model."""
 
+import json
+
 from bruno_mcp.models import BruRequest
 
 
@@ -116,3 +118,79 @@ class TestExtractPathParameters:
 
         assert params == {"baseUrl", "groupId", "userId"}
         assert "process.env.API_KEY" not in params
+
+
+class TestWithOverrides:
+    """Test with_overrides() method on BruRequest."""
+
+    def test_with_overrides_query_params_only(self):
+        """Test overriding query_params when body is None."""
+        request = BruRequest(
+            filepath="/path/to/request.bru",
+            meta={"name": "Test Request"},
+            method="GET",
+            url="https://api.example.com/posts",
+            params={"page": "1", "per_page": "20"},
+            headers={},
+        )
+
+        new_request = request.with_overrides(query_params={"page": "2"})
+
+        assert new_request.params == {"page": "2", "per_page": "20"}
+
+    def test_with_overrides_query_params_merges_with_existing(self):
+        """Test that query_params merge with existing params (not replace)."""
+        request = BruRequest(
+            filepath="/path/to/request.bru",
+            meta={},
+            method="GET",
+            url="https://api.example.com/posts",
+            params={"page": "1", "sort": "asc"},
+            headers={},
+        )
+
+        new_request = request.with_overrides(query_params={"page": "2"})
+
+        assert new_request.params == {"page": "2", "sort": "asc"}
+
+    def test_with_overrides_body_only(self):
+        """Test overriding body when query_params is None."""
+        request = BruRequest(
+            filepath="/path/to/request.bru",
+            meta={},
+            method="POST",
+            url="https://api.example.com/users",
+            params={},
+            headers={},
+            body={"type": "json", "content": '{"old": "data"}'},
+        )
+
+        new_request = request.with_overrides(body={"new": "data"})
+
+        assert new_request.body["type"] == "json"
+        body_content = json.loads(new_request.body["content"])
+        assert body_content == {"new": "data"}
+
+    def test_with_overrides_preserves_other_fields(self):
+        """Test that other fields are preserved when applying overrides."""
+        request = BruRequest(
+            filepath="/path/to/request.bru",
+            meta={"name": "Test Request", "type": "http", "seq": 1},
+            method="POST",
+            url="https://api.example.com/users",
+            params={"page": "1"},
+            headers={"Authorization": "Bearer token"},
+            body={"type": "json", "content": '{"key": "value"}'},
+            auth={"type": "bearer", "token": "abc123"},
+        )
+
+        new_request = request.with_overrides(body={"new": "data"})
+
+        assert new_request.filepath == request.filepath
+        assert new_request.meta == request.meta
+        assert new_request.method == request.method
+        assert new_request.url == request.url
+        assert new_request.headers == request.headers
+        assert new_request.auth == request.auth
+        assert new_request.params == request.params
+        assert new_request.body != request.body

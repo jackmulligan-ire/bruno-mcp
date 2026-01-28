@@ -1,6 +1,5 @@
 from pathlib import Path
 import os
-import json
 from typing import Any
 
 from bruno_mcp.executors import RequestExecutor
@@ -106,6 +105,7 @@ class MCPServer:
             environment_name: str | None = None,
             path_params: dict[str, str] | None = None,
             body: dict[str, Any] | None = None,
+            query_params: dict[str, Any] | None = None,
         ):
             """Execute a Bruno request by ID.
 
@@ -119,6 +119,11 @@ class MCPServer:
                 body: Optional dictionary to override the request body from the .bru file.
                      The body will be converted to JSON format and supports variable resolution.
                      Example: {"name": "John", "email": "{{email}}"}.
+                query_params: Optional dictionary of query parameters to override.
+                            These merge with query parameters from the .bru file, with
+                            query_params taking highest precedence. Supports variable resolution.
+                            Example: {"pageSize": "50", "pageNum": "2"} or
+                            {"pageSize": "{{defaultPageSize}}"}.
 
             Returns:
                 Dictionary containing the HTTP response (status, headers, body).
@@ -150,10 +155,8 @@ class MCPServer:
             full_path = self._collection_path / metadata.file_path
             request = self._bru_parser.parse_file(str(full_path))
 
-            # Override body if provided
-            if body is not None:
-                json_string = json.dumps(body)
-                request.body = {"type": "json", "content": json_string}
+            # Apply overrides
+            request = request.with_overrides(body=body, query_params=query_params)
 
             # Execute the request
             response = self._executor.execute(request, self._resolver_cls(merged_variables))

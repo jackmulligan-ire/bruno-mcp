@@ -940,3 +940,214 @@ class TestBodyParameter:
         body_content = json.loads(request.body["content"])
         assert body_content["title"] == "My Post"
         assert body_content["content"] == "Post content"
+
+
+class TestQueryParamsParameter:
+    """Test query_params parameter functionality"""
+
+    @patch("bruno_mcp.server.EnvParser")
+    @patch("bruno_mcp.server.VariableResolver")
+    @patch("bruno_mcp.server.RequestExecutor")
+    def test_tool_applies_query_params_override(
+        self, mock_executor_class, mock_resolver_class, mock_env_parser_class, sample_collection_dir
+    ):
+        """Test tool applies query_params override to request."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="posts/list-posts",
+                name="List Posts",
+                method="GET",
+                url="https://api.example.com/posts",
+                file_path="posts/list-posts.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "posts" / "list-posts.bru"),
+            meta={"name": "List Posts"},
+            method="GET",
+            url="https://api.example.com/posts",
+            params={"page": "1", "per_page": "20"},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = mock_env_parser_class.return_value
+        mock_env_parser.load_environment.return_value = {}
+        mock_executor = mock_executor_class.return_value
+        mock_executor.execute.return_value = BruResponse(
+            status=200, headers={}, body='{"posts": []}'
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+        override_params = {"page": "2", "per_page": "50"}
+
+        handler(request_id="posts/list-posts", query_params=override_params)
+
+        call_args = mock_executor.execute.call_args
+        request = call_args[0][0]
+        assert request.params["page"] == "2"
+        assert request.params["per_page"] == "50"
+
+    def test_tool_query_params_merge_with_existing_params(self, sample_collection_dir):
+        """Test query_params only override specified keys, keeping others from .bru file."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="posts/list-posts",
+                name="List Posts",
+                method="GET",
+                url="https://api.example.com/posts",
+                file_path="posts/list-posts.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "posts" / "list-posts.bru"),
+            meta={"name": "List Posts"},
+            method="GET",
+            url="https://api.example.com/posts",
+            params={"page": "1", "per_page": "20", "sort": "created_at"},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200, headers={}, body='{"posts": []}'
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        handler(request_id="posts/list-posts", query_params={"page": "2"})
+
+        call_args = mock_executor.execute.call_args
+        request = call_args[0][0]
+        assert request.params["page"] == "2"
+        assert request.params["per_page"] == "20"
+        assert request.params["sort"] == "created_at"
+
+    def test_tool_query_params_add_params_when_none_exist(self, sample_collection_dir):
+        """Test query_params can add params when .bru file has no params."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="posts/simple-get",
+                name="Simple Get",
+                method="GET",
+                url="https://api.example.com/posts",
+                file_path="posts/simple-get.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "posts" / "simple-get.bru"),
+            meta={"name": "Simple Get"},
+            method="GET",
+            url="https://api.example.com/posts",
+            params={},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200, headers={}, body='{"posts": []}'
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+        new_params = {"pageSize": "50", "pageNum": "2"}
+
+        handler(request_id="posts/simple-get", query_params=new_params)
+
+        call_args = mock_executor.execute.call_args
+        request = call_args[0][0]
+        assert request.params["pageSize"] == "50"
+        assert request.params["pageNum"] == "2"
+
+    def test_tool_query_params_override_bru_file_params_with_variables(self, sample_collection_dir):
+        """Test query_params override .bru file params even when .bru file params contain variables."""
+        mock_scanner = Mock()
+        mock_scanner.scan_collection.return_value = [
+            RequestMetadata(
+                id="posts/list-posts",
+                name="List Posts",
+                method="GET",
+                url="https://api.example.com/posts",
+                file_path="posts/list-posts.bru",
+            )
+        ]
+        mock_parser = Mock(spec=BruParser)
+        mock_parser.parse_file.return_value = BruRequest(
+            filepath=str(sample_collection_dir / "posts" / "list-posts.bru"),
+            meta={"name": "List Posts"},
+            method="GET",
+            url="https://api.example.com/posts",
+            params={"page": "{{defaultPage}}"},
+            headers={},
+            body=None,
+            auth=None,
+        )
+        mock_env_parser = Mock(spec=EnvParser)
+        mock_env_parser.load_environment.return_value = {"defaultPage": "1"}
+        mock_executor = Mock(spec=RequestExecutor)
+        mock_executor.execute.return_value = BruResponse(
+            status=200, headers={}, body='{"posts": []}'
+        )
+        mock_mcp = Mock()
+        MCPServer(
+            collection_path=sample_collection_dir,
+            bru_parser=mock_parser,
+            env_parser=mock_env_parser,
+            executor=mock_executor,
+            resolver_cls=VariableResolver,
+            scanner=mock_scanner,
+            mcp=mock_mcp,
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        all_calls = tool_decorator.call_args_list
+        handler = all_calls[0][0][0]
+
+        handler(request_id="posts/list-posts", query_params={"page": "5"})
+
+        call_args = mock_executor.execute.call_args
+        request = call_args[0][0]
+        assert request.params["page"] == "5"
