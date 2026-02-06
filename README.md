@@ -8,7 +8,11 @@ MCP server for Bruno API collections that executes requests via the Bruno CLI to
 
 The Bruno CLI tool (`bru`) must be installed and available in your PATH.
 
-1. Install Bruno CLI following the [official Bruno documentation](https://www.usebruno.com/docs/cli)
+1. Install Bruno CLI using npm 
+  ```bash
+  npm install -g @usebruno/cli
+  ```
+
 2. Verify installation:
    ```bash
    bru --version
