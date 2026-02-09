@@ -18,43 +18,81 @@ The Bruno CLI tool (`bru`) must be installed and available in your PATH.
    bru --version
    ```
 
-### 2. Install Python Dependencies
+### 2. Install uv (recommended)
 
-Install the project dependencies using `uv`:
+[uv](https://docs.astral.sh/uv/) is the recommended way to install and run bruno-mcp. It includes `uvx`, which handles package installation and execution automatically.
 
 ```bash
-uv sync
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
-
-This will create a virtual environment and install all required packages.
 
 ## Setup
 
-### MCP Configuration
+### MCP Configuration (uvx)
 
-Configure the MCP server by adding an entry to your IDE. For Cursor, create or edit the configuration file at `~/.cursor/mcp.json` with the following:
+Configure the MCP server by adding an entry to your IDE. For Cursor, create or edit the configuration file at `~/.cursor/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "bruno-mcp": {
-      "command": "/home/user/Projects/bruno-mcp/.venv/bin/python",
-      "args": ["-m", "bruno_mcp"],
-      "cwd": "/home/user/Projects/bruno-mcp",
+      "command": "uvx",
+      "args": ["bruno-mcp"],
       "env": {
-        "BRUNO_COLLECTION_PATH": "/home/user/Documents/My API Collection",
-        "PYTHONPATH": "/home/user/Projects/bruno-mcp/src"
+        "BRUNO_COLLECTION_PATH": "/path/to/your/bruno/collection"
       }
     }
   }
 }
 ```
 
-**Configuration Fields:**
-- `command`: Path to the Python interpreter in your virtual environment (typically `.venv/bin/python` in the project directory)
-- `args`: Command arguments to run the MCP server module
-- `cwd`: Working directory (should be the project root directory)
-- `env.BRUNO_COLLECTION_PATH`: Path to your Bruno collection directory
-- `env.PYTHONPATH`: Path to the `src` directory containing the `bruno_mcp` package
+The only configuration required is `BRUNO_COLLECTION_PATH`, which should point to your Bruno collection directory.
+
+### Alternative: Run Server Manually
+
+If you prefer not to use `uvx`, you can clone the repository and run the server directly:
+
+```bash
+git clone https://github.com/jackmulligan-ire/bruno-mcp.git
+cd bruno-mcp
+uv sync
+```
+
+Then configure your MCP client with the full paths:
+
+```json
+{
+  "mcpServers": {
+    "bruno-mcp": {
+      "command": "/path/to/bruno-mcp/.venv/bin/python",
+      "args": ["-m", "bruno_mcp"],
+      "cwd": "/path/to/bruno-mcp",
+      "env": {
+        "BRUNO_COLLECTION_PATH": "/path/to/your/bruno/collection",
+        "PYTHONPATH": "/path/to/bruno-mcp/src"
+      }
+    }
+  }
+}
+```
 
 After updating the configuration file, enable the server in your IDE's MCP settings.
+
+## Usage Notes
+
+### Variable Overrides
+
+The `run_request_by_id` tool accepts a `variable_overrides` parameter that maps to the Bruno CLI's `--env-var` flag. This allows you to substitute `{{variable}}` placeholders in your `.bru` files at runtime.
+
+**Important limitation:** `--env-var` can only override variables that are already defined in a Bruno environment. It cannot introduce new variables, or replace the values of pre-request and post-request variables. If a variable is not defined in any environment, the override will be silently ignored and the placeholder will resolve to an empty string.
+
+To use variable overrides:
+
+1. Define the variable in a Bruno environment file (even as an empty string):
+   ```
+   vars {
+     postId:
+   }
+   ```
+2. Pass `variable_overrides` when calling the tool. For example, if you have a `.bru` file with the URL `https://api.example.com/posts/{{postId}}` and an environment called `dev` that defines `postId`, you would call:
+   - `variable_overrides`: `{"postId": "42"}`

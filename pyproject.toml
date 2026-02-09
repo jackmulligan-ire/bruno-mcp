@@ -4,9 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bruno-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP server for Bruno API collections"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Jack Mulligan"}]
+readme = "README.md"
+keywords = ["mcp", "bruno", "api"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
 dependencies = [
     "fastmcp>=0.4.0",
     "httpx>=0.25.0",
@@ -32,6 +40,8 @@ dev-dependencies = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
+    "build>=1.4.0",
+    "twine>=6.2.0",
 ]
 
 [tool.pytest.ini_options]
@@ -54,3 +64,6 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[project.scripts]
+bruno-mcp = "bruno_mcp.__main__:main"
