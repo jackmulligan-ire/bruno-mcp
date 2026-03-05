@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures."""
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from dotenv import load_dotenv
@@ -30,3 +31,15 @@ def invalid_fixtures_dir(fixtures_dir):
 def collection_root():
     """Return a mock collection root for request ID generation."""
     return Path(__file__).parent / "fixtures" / "sample_collection"
+
+
+@pytest.fixture
+def mock_mcp():
+    """Mock FastMCP instance for MCP server tests."""
+    return Mock()
+
+
+@pytest.fixture
+def mock_executor():
+    """Mock executor for MCP server tests."""
+    return Mock()
