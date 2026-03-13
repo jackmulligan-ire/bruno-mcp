@@ -90,6 +90,31 @@ class MCPServer:
             )
 
     @classmethod
+    def _load_directory_collections(
+        cls,
+        path_str: str,
+        scanner: CollectionScanner,
+        collections: list[CollectionInfo],
+        collection_metadata: dict[str, list[RequestMetadata]],
+    ) -> None:
+        base_path = Path(path_str[:-2].rstrip("/")).resolve()
+        if not base_path.is_dir():
+            raise ValueError(f"Directory does not exist: {base_path}")
+        found_any = False
+        for child in sorted(base_path.iterdir()):
+            if child.is_dir() and (child / "bruno.json").exists():
+                try:
+                    metadata = scanner.scan_collection(child)
+                except ValueError as e:
+                    raise ValueError(str(e)) from e
+                qualified_name = f"{base_path.name}/{child.name}"
+                collections.append(CollectionInfo(name=qualified_name, path=child))
+                collection_metadata[qualified_name] = metadata
+                found_any = True
+        if not found_any:
+            raise ValueError(f"No collections found in {base_path}")
+
+    @classmethod
     def create(cls) -> "MCPServer":
         """Create MCPServer instance from environment configuration.
 
@@ -120,15 +145,26 @@ class MCPServer:
         collection_metadata: dict[str, list[RequestMetadata]] = {}
 
         for path_str in paths:
-            abs_path = Path(path_str).resolve()
-            try:
-                metadata = scanner.scan_collection(abs_path)
-            except ValueError as e:
-                raise ValueError(str(e)) from e
+            if path_str.endswith("/*"):
+                cls._load_directory_collections(path_str, scanner, collections, collection_metadata)
+            else:
+                abs_path = Path(path_str).resolve()
+                try:
+                    metadata = scanner.scan_collection(abs_path)
+                except ValueError as e:
+                    raise ValueError(str(e)) from e
 
-            name = abs_path.name
-            collections.append(CollectionInfo(name=name, path=abs_path))
-            collection_metadata[name] = metadata
+                name = abs_path.name
+                collections.append(CollectionInfo(name=name, path=abs_path))
+                collection_metadata[name] = metadata
+
+        names = [c.name for c in collections]
+        if len(names) != len(set(names)):
+            seen: set[str] = set()
+            for n in names:
+                if n in seen:
+                    raise ValueError(f"Duplicate collection name: {n}")
+                seen.add(n)
 
         return cls(
             collections=collections,
@@ -143,10 +179,7 @@ class MCPServer:
 
         @self._mcp.resource("bruno://collection_metadata")
         def collection_metadata():
-            return [
-                request.model_dump()
-                for request in self._active_collection_metadata()
-            ]
+            return [request.model_dump() for request in self._active_collection_metadata()]
 
         @self._mcp.resource("bruno://environments")
         def environments():
@@ -214,10 +247,7 @@ class MCPServer:
                     - url: Request URL (may contain {{variable}} placeholders)
                     - file_path: Relative path to the .bru file
             """
-            return [
-                request.model_dump()
-                for request in self._active_collection_metadata()
-            ]
+            return [request.model_dump() for request in self._active_collection_metadata()]
 
         @self._mcp.tool()
         def list_environments():
@@ -262,9 +292,7 @@ class MCPServer:
             Raises:
                 ValueError: If collection_name is not found.
             """
-            if not any(
-                collection.name == collection_name for collection in self._collections
-            ):
+            if not any(collection.name == collection_name for collection in self._collections):
                 raise ValueError(f"Collection not found: {collection_name}")
             self._active_collection_name = collection_name
             return collection_name

@@ -1,0 +1,1 @@
+Invalid - no bruno.json.
