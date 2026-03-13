@@ -1,8 +1,9 @@
 """Collection scanner for discovering Bruno .bru files."""
 
+import re
 from pathlib import Path
 
-from bruno_mcp.models import BruParseError, RequestMetadata
+from bruno_mcp.models import BruParseError, BruRequest, RequestMetadata
 from bruno_mcp.parsers import BruParser
 
 
@@ -44,6 +45,27 @@ class CollectionScanner:
         if len(files) > self.MAX_FILES:
             raise ValueError(f"Collection too large: {len(files)} files")
 
+    def _extract_variable_names_from_request(self, request: BruRequest) -> list[str]:
+        """Extract {{variable}} names from all variable-bearing fields of a BruRequest.
+
+        Excludes {{process.env.*}} patterns as those are resolved from the
+        system environment, not passed by the caller.
+        """
+        pattern = r"\{\{([^{}]+)\}\}"
+        names: set[str] = set()
+        texts = [request.url]
+        texts.extend(request.headers.values())
+        texts.extend(request.params.values())
+        if request.body and "content" in request.body:
+            texts.append(request.body["content"])
+        for text in texts:
+            if isinstance(text, str) and "{{" in text:
+                for match in re.findall(pattern, text):
+                    var_name = match.strip()
+                    if not var_name.startswith("process.env."):
+                        names.add(var_name)
+        return sorted(names)
+
     def scan_collection(self, collection_path: Path) -> list[RequestMetadata]:
         """Scan collection directory and extract metadata from all .bru files.
 
@@ -74,12 +96,15 @@ class CollectionScanner:
                 relative_path = file_path.relative_to(abs_path)
                 request_id = str(relative_path.with_suffix("")).replace("\\", "/")
 
+                variable_names = self._extract_variable_names_from_request(request)
+
                 metadata = RequestMetadata(
                     id=request_id,
                     name=request.get_name(),
                     method=request.method,
                     url=request.url,
                     file_path=str(relative_path).replace("\\", "/"),
+                    variable_names=variable_names,
                 )
                 results.append(metadata)
             except BruParseError as e:

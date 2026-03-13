@@ -1,0 +1,9 @@
+meta {
+  name: Request With Process Env
+  type: http
+  seq: 10
+}
+
+get {
+  url: https://api.example.com/secure?key={{process.env.API_KEY}}&id={{resourceId}}
+}

@@ -1,0 +1,9 @@
+meta {
+  name: Request With Undefined Var
+  type: http
+  seq: 99
+}
+
+get {
+  url: https://api.example.com/users/{{userId}}/extra/{{undefinedVar}}
+}

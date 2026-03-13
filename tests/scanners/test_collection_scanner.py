@@ -23,12 +23,15 @@ class TestCollectionScanner:
             "users/create-user",
             "users/update-user",
             "users/delete-user",
+            "users/request-with-undefined-var",
             "posts/create-post",
             "posts/list-posts",
             "posts/form-data",
             "posts/form-upload",
             "posts/nested-data",
             "posts/simple-get",
+            "posts/request-with-body-var",
+            "posts/request-with-process-env",
         ]
 
         results = scanner.scan_collection(sample_collection_dir)
@@ -160,6 +163,32 @@ class TestCollectionScanner:
 
         assert len(results) == 1
         assert results[0].name == "Normal Request"
+
+    def test_collection_scanner_extracts_variable_names_from_request(self, sample_collection_dir):
+        """RequestMetadata stores variable names extracted from URL, headers, body, and params."""
+        parser = BruParser()
+        scanner = CollectionScanner(parser)
+
+        results = scanner.scan_collection(sample_collection_dir)
+
+        get_user = next(r for r in results if r.id == "users/get-user")
+        assert set(get_user.variable_names) == {"userId", "authToken"}
+        body_var_request = next(r for r in results if r.id == "posts/request-with-body-var")
+        assert "postId" in body_var_request.variable_names
+
+    def test_collection_scanner_excludes_process_env_from_variable_names(
+        self, sample_collection_dir
+    ):
+        """{{process.env.VAR}} references are never included in variable_names."""
+        parser = BruParser()
+        scanner = CollectionScanner(parser)
+
+        results = scanner.scan_collection(sample_collection_dir)
+
+        process_env_request = next(r for r in results if r.id == "posts/request-with-process-env")
+        assert "resourceId" in process_env_request.variable_names
+        assert "process.env.API_KEY" not in process_env_request.variable_names
+        assert "API_KEY" not in process_env_request.variable_names
 
 
 class TestRequestMetadata:

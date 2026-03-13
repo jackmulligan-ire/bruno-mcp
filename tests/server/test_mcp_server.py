@@ -12,9 +12,6 @@ from bruno_mcp.models import BruEnvironment, BruResponse, CollectionInfo, Reques
 from bruno_mcp.parsers import EnvParser
 
 
-# --- Fixtures (server tests only) ---
-
-
 @pytest.fixture
 def second_collection_dir(fixtures_dir):
     """Path to second collection for multi-collection tests."""
@@ -668,6 +665,131 @@ class TestListRequestsTool:
 
         assert result == []
         assert isinstance(result, list)
+
+
+class TestListRequestsExampleCall:
+    """Test example_call field in list_requests output."""
+
+    @pytest.fixture
+    def captured_tool_handlers(self):
+        """Capture tool handlers registered via mcp.tool() for later invocation."""
+        handlers = {}
+
+        def capture(fn):
+            handlers[fn.__name__] = fn
+            return fn
+
+        mock_mcp = Mock()
+        mock_mcp.tool.return_value = capture
+        return handlers, mock_mcp
+
+    def test_list_requests_returns_correct_variable_names(
+        self,
+        sample_collection_dir,
+        bruno_env_single_path,
+        captured_tool_handlers,
+    ):
+        """example_call includes request_id, first environment name, and variable_overrides for env-defined vars."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        get_user = next(r for r in result if r["id"] == "users/get-user")
+        example = get_user["example_call"]
+        assert example["request_id"] == "users/get-user"
+        assert example["environment_name"] in ("local", "production")
+        assert "variable_overrides" in example
+        assert set(example["variable_overrides"].keys()) == {"userId", "authToken"}
+        for var_name, placeholder in example["variable_overrides"].items():
+            assert placeholder == f"<{var_name}>"
+
+    def test_list_requests_example_call_no_environments(
+        self,
+        second_collection_dir,
+        captured_tool_handlers,
+    ):
+        """No environments → example_call has only request_id."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+            with patch.dict(
+                os.environ, {"BRUNO_COLLECTION_PATH": str(second_collection_dir)}
+            ):
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        health_check = next(r for r in result if r["id"] == "health/check")
+        assert health_check["example_call"] == {"request_id": "health/check"}
+
+    def test_list_requests_example_call_no_variable_overrides_when_request_has_no_vars(
+        self,
+        sample_collection_dir,
+        bruno_env_single_path,
+        captured_tool_handlers,
+    ):
+        """Request with no vars + envs → environment_name present but no variable_overrides."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        simple_get = next(r for r in result if r["id"] == "posts/simple-get")
+        example = simple_get["example_call"]
+        assert example["request_id"] == "posts/simple-get"
+        assert example["environment_name"] in ("local", "production")
+        assert "variable_overrides" not in example
+
+    def test_list_requests_example_call_excludes_undefined_and_process_env_vars(
+        self,
+        sample_collection_dir,
+        bruno_env_single_path,
+        captured_tool_handlers,
+    ):
+        """Vars not in any env are omitted; process.env vars never appear in variable_overrides."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        request_with_undefined = next(
+            r for r in result if r["id"] == "users/request-with-undefined-var"
+        )
+        overrides = request_with_undefined["example_call"]["variable_overrides"]
+        assert "undefinedVar" not in overrides
+        assert "userId" in overrides
+        assert "process.env" not in str(overrides.keys())
 
 
 class TestRunBrunoRequestTool:

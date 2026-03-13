@@ -1,0 +1,15 @@
+meta {
+  name: Request With Body Var
+  type: http
+  seq: 9
+}
+
+post {
+  url: https://api.example.com/posts/{{postId}}/publish
+}
+
+body:json {
+  {
+    "comment": "Publishing post {{postId}}"
+  }
+}

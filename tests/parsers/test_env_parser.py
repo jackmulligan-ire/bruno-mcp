@@ -52,7 +52,7 @@ class TestEnvironmentDiscovery:
         """Test all .bru files discovered and parsed with name and variables."""
         parser = EnvParser()
         environments = parser.list_environments(sample_collection_dir)
-        
+
         assert len(environments) == 2
         local_env = next(e for e in environments if e.name == "local")
         prod_env = next(e for e in environments if e.name == "production")
@@ -72,7 +72,7 @@ class TestEnvironmentDiscovery:
         """Test secrets included in variables dict as template strings."""
         parser = EnvParser()
         environments = parser.list_environments(sample_collection_dir)
-        
+
         local_env = next(e for e in environments if e.name == "local")
         assert local_env.variables["authToken"] == "{{process.env.SECRET_TOKEN}}"
         assert local_env.variables["baseUrl"] == "http://localhost:3000"

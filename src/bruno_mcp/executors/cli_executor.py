@@ -104,7 +104,9 @@ class CLIExecutor:
             temp_output = Path(f.name)
 
         try:
-            cmd = self._build_command(request_file_path, environment_name, variable_overrides, temp_output)
+            cmd = self._build_command(
+                request_file_path, environment_name, variable_overrides, temp_output
+            )
 
             result = subprocess.run(
                 cmd,
@@ -115,9 +117,7 @@ class CLIExecutor:
             )
 
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Bruno CLI failed: {result.stderr}\nCommand: {' '.join(cmd)}"
-                )
+                raise RuntimeError(f"Bruno CLI failed: {result.stderr}\nCommand: {' '.join(cmd)}")
 
             with open(temp_output) as f:
                 cli_results = json.loads(f.read())
@@ -136,7 +136,7 @@ class CLIExecutor:
                 body=body,
             )
         except FileNotFoundError as e:
-                raise RuntimeError(f"Bruno CLI failed: {e}") from e
+            raise RuntimeError(f"Bruno CLI failed: {e}") from e
         finally:
             if temp_output.exists():
                 temp_output.unlink()

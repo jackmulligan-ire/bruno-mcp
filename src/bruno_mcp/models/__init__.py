@@ -6,6 +6,7 @@ from bruno_mcp.models.bru_parse_error import BruParseError
 from bruno_mcp.models.bru_request import BruRequest
 from bruno_mcp.models.bru_response import BruResponse
 from bruno_mcp.models.collection_info import CollectionInfo
+from bruno_mcp.models.request_example import RequestExample
 from bruno_mcp.models.request_metadata import RequestMetadata
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "BruParseError",
     "BruResponse",
     "CollectionInfo",
+    "RequestExample",
     "RequestMetadata",
 ]

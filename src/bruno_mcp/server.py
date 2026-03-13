@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from bruno_mcp.executors import CLIExecutor
-from bruno_mcp.models import CollectionInfo, RequestMetadata
+from bruno_mcp.models import BruEnvironment, CollectionInfo, RequestExample, RequestMetadata
 from bruno_mcp.parsers import BruParser, EnvParser
 from bruno_mcp.scanners import CollectionScanner
 from fastmcp import FastMCP
@@ -60,6 +60,30 @@ class MCPServer:
     def _active_collection_metadata(self) -> list[RequestMetadata]:
         """Request metadata for the currently active collection."""
         return self._collection_metadata.get(self._active_collection_name, [])
+
+    def _generate_request_example(
+        self,
+        request: RequestMetadata,
+        environments: list[BruEnvironment],
+    ) -> RequestExample:
+        """
+        Build a RequestExample for the given request and available environments.
+        Returns any variables that are available in all environments that the request uses.
+        """
+        if not environments:
+            return RequestExample(request_id=request.id)
+
+        env_var_names: set[str] = set()
+        for env in environments:
+            env_var_names.update(env.variables.keys())
+
+        overridable = sorted(name for name in request.variable_names if name in env_var_names)
+
+        return RequestExample(
+            request_id=request.id,
+            environment_name=environments[0].name,
+            variable_overrides={name: f"<{name}>" for name in overridable} if overridable else None,
+        )
 
     @property
     def mcp(self) -> FastMCP:
@@ -143,10 +167,7 @@ class MCPServer:
 
         @self._mcp.resource("bruno://collection_metadata")
         def collection_metadata():
-            return [
-                request.model_dump()
-                for request in self._active_collection_metadata()
-            ]
+            return [request.model_dump() for request in self._active_collection_metadata()]
 
         @self._mcp.resource("bruno://environments")
         def environments():
@@ -213,11 +234,15 @@ class MCPServer:
                     - method: HTTP method (GET, POST, PUT, DELETE, etc.)
                     - url: Request URL (may contain {{variable}} placeholders)
                     - file_path: Relative path to the .bru file
+                    - example_call: Ready-to-use run_request_by_id invocation
             """
-            return [
-                request.model_dump()
-                for request in self._active_collection_metadata()
-            ]
+            environments = self._env_parser.list_environments(self._active_collection_path())
+            result = []
+            for request in self._active_collection_metadata():
+                request.example_call = self._generate_request_example(request, environments)
+                request_output = request.model_dump()
+                result.append(request_output)
+            return result
 
         @self._mcp.tool()
         def list_environments():
@@ -262,9 +287,7 @@ class MCPServer:
             Raises:
                 ValueError: If collection_name is not found.
             """
-            if not any(
-                collection.name == collection_name for collection in self._collections
-            ):
+            if not any(collection.name == collection_name for collection in self._collections):
                 raise ValueError(f"Collection not found: {collection_name}")
             self._active_collection_name = collection_name
             return collection_name
