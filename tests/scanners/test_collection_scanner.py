@@ -5,10 +5,14 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from bruno_mcp.models import BruParseError, BruRequest
+from bruno_mcp.models import BruParseError, BruRequest, CollectionInfo, RequestMetadata
 from bruno_mcp.parsers import BruParser
-from bruno_mcp.models import RequestMetadata
-from bruno_mcp.scanners import CollectionScanner
+from bruno_mcp.scanners.collection_scanner import CollectionFormat, CollectionScanner
+
+
+def bru_collection_info(path: Path) -> CollectionInfo:
+    resolved = path.resolve()
+    return CollectionInfo(name=resolved.name, path=resolved, format=CollectionFormat.BRU)
 
 
 class TestCollectionScanner:
@@ -34,7 +38,7 @@ class TestCollectionScanner:
             "posts/request-with-process-env",
         ]
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         result_ids = [r.id for r in results]
         for expected_id in expected_ids:
@@ -45,7 +49,7 @@ class TestCollectionScanner:
         parser = BruParser()
         scanner = CollectionScanner(parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         get_user = next(r for r in results if r.id == "users/get-user")
         assert get_user.name == "Get User"
@@ -58,7 +62,7 @@ class TestCollectionScanner:
         parser = BruParser()
         scanner = CollectionScanner(parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         ids = [r.id for r in results]
         assert "users/get-user" in ids
@@ -71,7 +75,7 @@ class TestCollectionScanner:
         parser = BruParser()
         scanner = CollectionScanner(parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         user_requests = [r for r in results if r.id.startswith("users/")]
         post_requests = [r for r in results if r.id.startswith("posts/")]
@@ -108,7 +112,7 @@ class TestCollectionScanner:
 
         scanner = CollectionScanner(mock_parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         assert len(results) == 1
         assert results[0].name == "Valid Request"
@@ -121,7 +125,7 @@ class TestCollectionScanner:
         scanner = CollectionScanner(parser)
 
         with pytest.raises(ValueError, match="Not a valid Bruno collection"):
-            scanner.scan_collection(sample_collection_dir)
+            scanner.scan_collection_for_format(sample_collection_dir)
 
     @patch("bruno_mcp.scanners.collection_scanner.Path.rglob")
     def test_scan_enforces_max_file_limit(self, mock_rglob, sample_collection_dir):
@@ -132,7 +136,7 @@ class TestCollectionScanner:
         scanner = CollectionScanner(parser)
 
         with pytest.raises(ValueError, match="Collection too large"):
-            scanner.scan_collection(sample_collection_dir)
+            scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
     @patch("bruno_mcp.scanners.collection_scanner.Path.rglob")
     def test_scan_skips_oversized_files(self, mock_rglob, sample_collection_dir):
@@ -159,7 +163,7 @@ class TestCollectionScanner:
 
         scanner = CollectionScanner(mock_parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         assert len(results) == 1
         assert results[0].name == "Normal Request"
@@ -169,7 +173,7 @@ class TestCollectionScanner:
         parser = BruParser()
         scanner = CollectionScanner(parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         get_user = next(r for r in results if r.id == "users/get-user")
         assert set(get_user.variable_names) == {"userId", "authToken"}
@@ -183,12 +187,58 @@ class TestCollectionScanner:
         parser = BruParser()
         scanner = CollectionScanner(parser)
 
-        results = scanner.scan_collection(sample_collection_dir)
+        results = scanner.scan_collection_for_requests(bru_collection_info(sample_collection_dir))
 
         process_env_request = next(r for r in results if r.id == "posts/request-with-process-env")
         assert "resourceId" in process_env_request.variable_names
         assert "process.env.API_KEY" not in process_env_request.variable_names
         assert "API_KEY" not in process_env_request.variable_names
+
+
+class TestScanCollectionForFormat:
+    """Tests for collection root detection and OpenCollection placeholder scan."""
+
+    def test_scan_for_format_returns_bru_for_bru_collection(self, sample_collection_dir):
+        parser = BruParser()
+        scanner = CollectionScanner(parser)
+
+        assert scanner.scan_collection_for_format(sample_collection_dir) == CollectionFormat.BRU
+
+    def test_scan_for_format_returns_opencollection(self, opencollection_root: Path):
+        parser = BruParser()
+        scanner = CollectionScanner(parser)
+        root = opencollection_root.resolve()
+
+        assert scanner.scan_collection_for_format(root) == CollectionFormat.OPENCOLLECTION
+
+    def test_scan_for_format_raises_when_both_markers_present(
+        self, mixed_collection_markers: Path
+    ):
+        parser = BruParser()
+        scanner = CollectionScanner(parser)
+        root = mixed_collection_markers.resolve()
+
+        with pytest.raises(ValueError) as exc_info:
+            scanner.scan_collection_for_format(root)
+
+        message = str(exc_info.value)
+        assert "bruno.json" in message
+        assert "opencollection.yml" in message
+        assert str(root) in message
+
+    def test_scan_for_requests_returns_empty_for_opencollection(
+        self, opencollection_root: Path
+    ):
+        parser = BruParser()
+        scanner = CollectionScanner(parser)
+        root = opencollection_root.resolve()
+        info = CollectionInfo(
+            name=root.name,
+            path=root,
+            format=CollectionFormat.OPENCOLLECTION,
+        )
+
+        assert scanner.scan_collection_for_requests(info) == []
 
 
 class TestRequestMetadata:

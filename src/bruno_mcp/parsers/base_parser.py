@@ -3,8 +3,8 @@
 from bruno_mcp.models import BruParseError
 
 
-class BaseParser:
-    """Base parser with shared parsing logic for .bru files."""
+class BaseBruParser:
+    """Shared section-splitting logic for .bru files."""
 
     def _split_into_sections(self, content: str) -> dict[str, list[str]]:
         """Split file content into named sections.

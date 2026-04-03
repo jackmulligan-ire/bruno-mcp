@@ -1,16 +1,16 @@
-"""Environment parser for Bruno collection and environment files."""
+"""Environment parser for Bruno environment .bru files under a collection."""
 
 import logging
 from pathlib import Path
 
-from bruno_mcp.models import BruEnvironment, BruParseError
-from bruno_mcp.parsers.base_parser import BaseParser
+from bruno_mcp.models import BruEnvironment, BruParseError, CollectionFormat, CollectionInfo
+from bruno_mcp.parsers import BaseBruParser
 
 logger = logging.getLogger(__name__)
 
 
-class EnvParser(BaseParser):
-    """Parser for Bruno collection (bruno.json) and environment (.bru) files."""
+class EnvParser(BaseBruParser):
+    """Parser for Bruno environment .bru files related to environments."""
 
     def _parse_vars_section(self, lines: list[str]) -> dict:
         """Parse vars or vars:secret section into dictionary."""
@@ -56,20 +56,25 @@ class EnvParser(BaseParser):
 
         return result
 
-    def list_environments(self, collection_path: Path) -> list[BruEnvironment]:
+    def list_environments(self, collection_info: CollectionInfo) -> list[BruEnvironment]:
         """List all environments in a collection.
 
-        Scans collection_path / "environments" for *.bru files, parses each one,
-        and returns a list of environment models with name and variables.
+        For classic Bruno collections, scans ``collection_info.path / "environments"``
+        for ``*.bru`` files. OpenCollection roots return an empty list until YAML
+        environment support is implemented.
 
         Args:
-            collection_path: Path to the Bruno collection directory.
+            collection_info: Loaded collection metadata (path and format).
 
         Returns:
             List of BruEnvironment instances with name and variables.
-            Returns empty list if environments directory doesn't exist.
+            Empty list if the format has no .bru environments yet or the env dir
+            is missing.
         """
-        env_dir = collection_path / "environments"
+        if collection_info.format == CollectionFormat.OPENCOLLECTION:
+            return []
+
+        env_dir = collection_info.path / "environments"
         if not env_dir.exists():
             return []
 

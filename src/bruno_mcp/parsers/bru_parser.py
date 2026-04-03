@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Optional
 
 from bruno_mcp.models import BruRequest, BruParseError
-from bruno_mcp.parsers.base_parser import BaseParser
+from bruno_mcp.parsers import BaseBruParser
 
 
-class BruParser(BaseParser):
+class BruParser(BaseBruParser):
     """Parser for Bruno .bru files.
 
     This parser uses a line-by-line state machine approach to parse the

@@ -1,0 +1,4 @@
+# Deliberately paired with bruno.json to test ambiguous-root detection.
+
+meta:
+  fixture: mixed_collection_markers

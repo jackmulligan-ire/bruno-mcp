@@ -1,7 +1,10 @@
 """Tests for environment parser - parses bruno.json and environment .bru files."""
 
+from pathlib import Path
+
 import pytest
 
+from bruno_mcp.models import CollectionFormat, CollectionInfo
 from bruno_mcp.parsers import EnvParser
 
 
@@ -51,7 +54,13 @@ class TestEnvironmentDiscovery:
     def test_list_environments_returns_all_environment_files(self, sample_collection_dir):
         """Test all .bru files discovered and parsed with name and variables."""
         parser = EnvParser()
-        environments = parser.list_environments(sample_collection_dir)
+        collection = CollectionInfo(
+            name=sample_collection_dir.name,
+            path=sample_collection_dir,
+            format=CollectionFormat.BRU,
+        )
+
+        environments = parser.list_environments(collection)
 
         assert len(environments) == 2
         local_env = next(e for e in environments if e.name == "local")
@@ -64,14 +73,26 @@ class TestEnvironmentDiscovery:
     def test_list_environments_handles_missing_environments_directory(self, empty_collection_dir):
         """Test empty list returned when directory doesn't exist."""
         parser = EnvParser()
-        environments = parser.list_environments(empty_collection_dir)
+        collection = CollectionInfo(
+            name=empty_collection_dir.name,
+            path=empty_collection_dir,
+            format=CollectionFormat.BRU,
+        )
+
+        environments = parser.list_environments(collection)
 
         assert environments == []
 
     def test_list_environments_includes_secrets_as_template_strings(self, sample_collection_dir):
         """Test secrets included in variables dict as template strings."""
         parser = EnvParser()
-        environments = parser.list_environments(sample_collection_dir)
+        collection = CollectionInfo(
+            name=sample_collection_dir.name,
+            path=sample_collection_dir,
+            format=CollectionFormat.BRU,
+        )
+
+        environments = parser.list_environments(collection)
 
         local_env = next(e for e in environments if e.name == "local")
         assert local_env.variables["authToken"] == "{{process.env.SECRET_TOKEN}}"

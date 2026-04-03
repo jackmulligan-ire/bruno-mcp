@@ -3,7 +3,13 @@
 import re
 from pathlib import Path
 
-from bruno_mcp.models import BruParseError, BruRequest, RequestMetadata
+from bruno_mcp.models import (
+    BruParseError,
+    BruRequest,
+    CollectionFormat,
+    CollectionInfo,
+    RequestMetadata,
+)
 from bruno_mcp.parsers import BruParser
 
 
@@ -20,18 +26,6 @@ class CollectionScanner:
             parser: BruParser instance for parsing .bru files.
         """
         self.parser = parser
-
-    def _validate_collection_path(self, path: Path) -> None:
-        """Validate that path contains bruno.json.
-
-        Args:
-            path: Path to validate.
-
-        Raises:
-            ValueError: If bruno.json is not found.
-        """
-        if not (path / "bruno.json").exists():
-            raise ValueError(f"Not a valid Bruno collection: {path}")
 
     def _enforce_file_limit(self, files: list) -> None:
         """Check that file count doesn't exceed maximum.
@@ -66,26 +60,53 @@ class CollectionScanner:
                         names.add(var_name)
         return sorted(names)
 
-    def scan_collection(self, collection_path: Path) -> list[RequestMetadata]:
-        """Scan collection directory and extract metadata from all .bru files.
+    def scan_collection_for_format(self, collection_path: Path) -> CollectionFormat:
+        """Detect collection layout from root marker files.
 
         Args:
             collection_path: Path to Bruno collection root directory.
 
         Returns:
-            List of RequestMetadata for all valid .bru files.
+            Bru layout if ``bruno.json`` exists, OpenCollection if ``opencollection.yml`` exists.
 
         Raises:
-            ValueError: If directory is not a valid Bruno collection or exceeds limits.
+            ValueError: If both markers exist, if neither exists, or the path is ambiguous.
         """
         abs_path = collection_path.resolve()
+        has_bru = (abs_path / "bruno.json").exists()
+        has_oc = (abs_path / "opencollection.yml").exists()
 
-        self._validate_collection_path(abs_path)
+        if has_bru and has_oc:
+            raise ValueError(
+                "This folder contains both bruno.json and opencollection.yml, which indicate "
+                "two different collection formats (classic .bru vs OpenCollection YAML). "
+                "Remove one of these files so the collection has a single format. Path: "
+                f"{abs_path}"
+            )
 
+        elif has_bru:
+            return CollectionFormat.BRU
+        elif has_oc:
+            return CollectionFormat.OPENCOLLECTION
+        raise ValueError(f"Not a valid Bruno collection: {abs_path}")
+
+    def scan_collection_for_requests(self, collection_info: CollectionInfo) -> list[RequestMetadata]:
+        """Scan collection and build request metadata for the detected format.
+
+        Args:
+            collection_info: Loaded collection with path and format.
+
+        Returns:
+            List of RequestMetadata (empty for OpenCollection until YAML scanning exists).
+        """
+        if collection_info.format is CollectionFormat.OPENCOLLECTION:
+            return []
+
+        abs_path = collection_info.path.resolve()
         bru_files = list(abs_path.rglob("*.bru"))
         self._enforce_file_limit(bru_files)
 
-        results = []
+        results: list[RequestMetadata] = []
 
         for file_path in bru_files:
             if file_path.stat().st_size > self.MAX_FILE_SIZE:

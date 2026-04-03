@@ -22,6 +22,18 @@ def sample_collection_dir(fixtures_dir):
 
 
 @pytest.fixture
+def opencollection_root(fixtures_dir):
+    """Return path to minimal OpenCollection root (opencollection.yml only)."""
+    return fixtures_dir / "opencollection_root"
+
+
+@pytest.fixture
+def mixed_collection_markers(fixtures_dir):
+    """Return path to a directory with both bruno.json and opencollection.yml (invalid root)."""
+    return fixtures_dir / "mixed_collection_markers"
+
+
+@pytest.fixture
 def invalid_fixtures_dir(fixtures_dir):
     """Return path to invalid fixtures directory."""
     return fixtures_dir / "invalid"

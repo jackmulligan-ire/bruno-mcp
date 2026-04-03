@@ -1,0 +1,5 @@
+# Minimal OpenCollection root fixture for scanner tests.
+# Only `opencollection.yml` at the collection root is required for format detection.
+
+meta:
+  fixture: opencollection_root
