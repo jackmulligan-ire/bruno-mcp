@@ -1,0 +1,8 @@
+# HTTP request with no info.name (invalid for YamlParser).
+info:
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: https://example.com/

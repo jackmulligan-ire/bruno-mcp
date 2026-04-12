@@ -34,8 +34,14 @@ def mixed_collection_markers(fixtures_dir):
 
 
 @pytest.fixture
+def opencollection_collection(fixtures_dir):
+    """Return path to OpenCollection fixture with YAML request files."""
+    return fixtures_dir / "opencollection_collection"
+
+
+@pytest.fixture
 def invalid_fixtures_dir(fixtures_dir):
-    """Return path to invalid fixtures directory."""
+    """Return path to invalid fixtures directory (e.g. malformed.yml for YamlParser)."""
     return fixtures_dir / "invalid"
 
 

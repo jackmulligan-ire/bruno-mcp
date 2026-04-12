@@ -8,6 +8,7 @@ from bruno_mcp.models.bru_response import BruResponse
 from bruno_mcp.models.collection_info import CollectionFormat, CollectionInfo
 from bruno_mcp.models.request_example import RequestExample
 from bruno_mcp.models.request_metadata import RequestMetadata
+from bruno_mcp.models.yaml_request import YamlRequest
 
 __all__ = [
     "BaseRequest",
@@ -19,4 +20,5 @@ __all__ = [
     "CollectionInfo",
     "RequestExample",
     "RequestMetadata",
+    "YamlRequest",
 ]

@@ -1,0 +1,17 @@
+info:
+  name: Create User
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: https://api.example.com/users
+  body:
+    type: json
+    data: |-
+      {
+        "name": "{{displayName}}"
+      }
+
+settings:
+  encodeUrl: true

@@ -1,0 +1,9 @@
+# Placeholder env file; excluded from request scan when scanner work lands.
+info:
+  name: Local
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: https://example.com/health
