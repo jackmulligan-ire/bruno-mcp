@@ -13,6 +13,7 @@ http:
     - name: limit
       value: "10"
       type: query
+  auth: inherit
 
 settings:
   encodeUrl: true

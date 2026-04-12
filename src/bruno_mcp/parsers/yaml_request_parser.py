@@ -45,7 +45,7 @@ class YamlParser:
             raise BruParseError(f"Invalid http.body in {filepath}")
 
         auth = http.get("auth")
-        if auth is not None and not isinstance(auth, dict):
+        if auth is not None and not isinstance(auth, (dict, str)):
             raise BruParseError(f"Invalid http.auth in {filepath}")
 
     def parse_file(self, filepath: str) -> YamlRequest:

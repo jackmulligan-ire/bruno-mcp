@@ -16,4 +16,4 @@ class YamlRequest(BaseRequest):
     headers: list[dict[str, Any]] = Field(default_factory=list)
     params: list[dict[str, Any]] = Field(default_factory=list)
     body: Optional[dict[str, Any]] = None
-    auth: Optional[dict[str, Any]] = None
+    auth: Optional[dict[str, Any] | str] = None

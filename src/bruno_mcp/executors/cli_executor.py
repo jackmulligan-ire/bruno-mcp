@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from bruno_mcp.models import BruResponse
+from bruno_mcp.models import BruResponse, CollectionInfo
 
 
 class CLIExecutor:
@@ -81,15 +81,15 @@ class CLIExecutor:
     def execute(
         self,
         request_file_path: Path,
-        collection_path: Path,
+        collection: CollectionInfo,
         environment_name: Optional[str] = None,
         variable_overrides: Optional[dict[str, str]] = None,
     ) -> BruResponse:
         """Execute request via Bruno CLI.
 
         Args:
-            request_file_path: Path to .bru file (relative to collection_path).
-            collection_path: Root of Bruno collection directory.
+            request_file_path: Path to request file (relative to collection root).
+            collection: Loaded collection whose ``path`` is used as the working directory.
             environment_name: Optional environment name to use.
             variable_overrides: Optional dict of variable overrides.
 
@@ -110,7 +110,7 @@ class CLIExecutor:
 
             result = subprocess.run(
                 cmd,
-                cwd=str(collection_path),
+                cwd=str(collection.path),
                 capture_output=True,
                 text=True,
                 check=False,

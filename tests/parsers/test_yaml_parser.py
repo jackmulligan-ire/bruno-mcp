@@ -26,6 +26,15 @@ class TestYamlParserParseFile:
         assert request.params == [
             {"name": "limit", "value": "10", "type": "query"},
         ]
+        assert request.auth == "inherit"
+
+    def test_parse_file_auth_is_dict_for_typed_auth(self, opencollection_collection):
+        parser = YamlParser()
+        filepath = opencollection_collection / "users" / "get-bearer-auth.yml"
+
+        request = parser.parse_file(str(filepath))
+
+        assert request.auth == {"type": "bearer", "token": "{{token}}"}
 
     def test_parse_file_returns_yaml_request_with_body(self, opencollection_collection):
         parser = YamlParser()

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 
 from bruno_mcp.executors import CLIExecutor
-from bruno_mcp.models import BruResponse
+from bruno_mcp.models import BruResponse, CollectionFormat, CollectionInfo
 
 
 class TestCLICommandConstruction:
@@ -22,8 +22,12 @@ class TestCLICommandConstruction:
         return Path("users/get-user.bru")
 
     @pytest.fixture
-    def collection_path(self):
-        return Path("/collection")
+    def collection_info(self):
+        return CollectionInfo(
+            name="test",
+            path=Path("/collection"),
+            format=CollectionFormat.BRU,
+        )
 
     @pytest.fixture
     def mock_temp_file(self):
@@ -65,10 +69,10 @@ class TestCLICommandConstruction:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Verifies basic CLI command with request file path."""
-        executor.execute(request_file, collection_path)
+        executor.execute(request_file, collection_info)
 
         mock_subprocess_success.assert_called_once()
         call_args = mock_subprocess_success.call_args
@@ -83,10 +87,10 @@ class TestCLICommandConstruction:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Adds --env flag when environment provided."""
-        executor.execute(request_file, collection_path, environment_name="local")
+        executor.execute(request_file, collection_info, environment_name="local")
 
         call_args = mock_subprocess_success.call_args
         cmd = call_args[0][0]
@@ -101,12 +105,12 @@ class TestCLICommandConstruction:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Adds multiple --env-var flags correctly."""
         overrides = {"userId": "123", "token": "abc"}
 
-        executor.execute(request_file, collection_path, variable_overrides=overrides)
+        executor.execute(request_file, collection_info, variable_overrides=overrides)
 
         call_args = mock_subprocess_success.call_args
         cmd = call_args[0][0]
@@ -129,8 +133,12 @@ class TestJSONOutputParsing:
         return Path("users/get-user.bru")
 
     @pytest.fixture
-    def collection_path(self):
-        return Path("/collection")
+    def collection_info(self):
+        return CollectionInfo(
+            name="test",
+            path=Path("/collection"),
+            format=CollectionFormat.BRU,
+        )
 
     @pytest.fixture
     def mock_temp_file(self):
@@ -167,7 +175,7 @@ class TestJSONOutputParsing:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Extracts status, headers, body from JSON."""
         json_data = [
@@ -185,7 +193,7 @@ class TestJSONOutputParsing:
         ]
         mock_open_file.return_value.read.return_value = json.dumps(json_data)
 
-        response = executor.execute(request_file, collection_path)
+        response = executor.execute(request_file, collection_info)
 
         assert response.status == 200
         assert "content-type" in response.headers
@@ -198,7 +206,7 @@ class TestJSONOutputParsing:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Serializes parsed JSON data back to string."""
         json_data = [
@@ -210,7 +218,7 @@ class TestJSONOutputParsing:
         ]
         mock_open_file.return_value.read.return_value = json.dumps(json_data)
 
-        response = executor.execute(request_file, collection_path)
+        response = executor.execute(request_file, collection_info)
 
         assert isinstance(response.body, str)
         parsed_body = json.loads(response.body)
@@ -229,8 +237,12 @@ class TestErrorHandling:
         return Path("users/get-user.bru")
 
     @pytest.fixture
-    def collection_path(self):
-        return Path("/collection")
+    def collection_info(self):
+        return CollectionInfo(
+            name="test",
+            path=Path("/collection"),
+            format=CollectionFormat.BRU,
+        )
 
     @pytest.fixture
     def mock_temp_file(self):
@@ -253,18 +265,18 @@ class TestErrorHandling:
 
     @patch("bruno_mcp.executors.cli_executor.subprocess.run")
     def test_execute_raises_on_cli_not_found(
-        self, mock_subprocess, executor, request_file, collection_path
+        self, mock_subprocess, executor, request_file, collection_info
     ):
         """Raises RuntimeError when bru command missing."""
         mock_subprocess.side_effect = FileNotFoundError("bru: command not found")
 
         with pytest.raises(RuntimeError) as exc_info:
-            executor.execute(request_file, collection_path)
+            executor.execute(request_file, collection_info)
 
         assert "Bruno CLI failed" in str(exc_info.value)
 
     def test_execute_raises_on_non_zero_exit(
-        self, mock_subprocess_success, mock_temp_file, executor, request_file, collection_path
+        self, mock_subprocess_success, mock_temp_file, executor, request_file, collection_info
     ):
         """Raises RuntimeError with stderr on CLI failure."""
         mock_result = MagicMock()
@@ -273,7 +285,7 @@ class TestErrorHandling:
         mock_subprocess_success.return_value = mock_result
 
         with pytest.raises(RuntimeError) as exc_info:
-            executor.execute(request_file, collection_path)
+            executor.execute(request_file, collection_info)
 
         assert "Bruno CLI failed" in str(exc_info.value)
         assert "Error: Collection not found" in str(exc_info.value)
@@ -286,11 +298,11 @@ class TestErrorHandling:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Raises ValueError when JSON parsing fails."""
         with pytest.raises((ValueError, json.JSONDecodeError)):
-            executor.execute(request_file, collection_path)
+            executor.execute(request_file, collection_info)
 
     def test_execute_raises_on_empty_results_array(
         self,
@@ -299,13 +311,13 @@ class TestErrorHandling:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Raises ValueError when no results in output."""
         mock_open_file.return_value.read.return_value = "[]"
 
         with pytest.raises(ValueError) as exc_info:
-            executor.execute(request_file, collection_path)
+            executor.execute(request_file, collection_info)
 
         assert "No results" in str(exc_info.value)
 
@@ -322,8 +334,12 @@ class TestTempFileHandling:
         return Path("users/get-user.bru")
 
     @pytest.fixture
-    def collection_path(self):
-        return Path("/collection")
+    def collection_info(self):
+        return CollectionInfo(
+            name="test",
+            path=Path("/collection"),
+            format=CollectionFormat.BRU,
+        )
 
     @pytest.fixture
     def mock_subprocess_success(self):
@@ -342,7 +358,7 @@ class TestTempFileHandling:
             yield mock_file
 
     def test_execute_creates_and_reads_temp_file(
-        self, mock_open_file, mock_subprocess_success, executor, request_file, collection_path
+        self, mock_open_file, mock_subprocess_success, executor, request_file, collection_info
     ):
         """Creates temp file and reads JSON output."""
         # Track the temp file path that gets created
@@ -360,7 +376,7 @@ class TestTempFileHandling:
             "bruno_mcp.executors.cli_executor.tempfile.NamedTemporaryFile",
             side_effect=capture_temp_file,
         ):
-            executor.execute(request_file, collection_path)
+            executor.execute(request_file, collection_info)
 
         # Verify temp file was created and used
         assert len(temp_file_paths) == 1
@@ -372,7 +388,7 @@ class TestTempFileHandling:
         assert mock_open_file.call_args[0][0] == temp_path
 
     def test_execute_deletes_temp_file_after_execution(
-        self, mock_open_file, mock_subprocess_success, executor, request_file, collection_path
+        self, mock_open_file, mock_subprocess_success, executor, request_file, collection_info
     ):
         """Removes temp file after execution completes."""
         # Track the temp file path that gets created
@@ -390,7 +406,7 @@ class TestTempFileHandling:
             "bruno_mcp.executors.cli_executor.tempfile.NamedTemporaryFile",
             side_effect=capture_temp_file,
         ):
-            executor.execute(request_file, collection_path)
+            executor.execute(request_file, collection_info)
 
         # Verify temp file was created
         assert len(temp_file_paths) == 1
@@ -412,8 +428,12 @@ class TestIntegration:
         return Path("users/get-user.bru")
 
     @pytest.fixture
-    def collection_path(self):
-        return Path("/collection")
+    def collection_info(self):
+        return CollectionInfo(
+            name="test",
+            path=Path("/collection"),
+            format=CollectionFormat.BRU,
+        )
 
     @pytest.fixture
     def mock_temp_file(self):
@@ -441,7 +461,7 @@ class TestIntegration:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Complete execution with environment flag."""
         json_data = [
@@ -459,7 +479,7 @@ class TestIntegration:
         ]
         mock_open_file.return_value.read.return_value = json.dumps(json_data)
 
-        response = executor.execute(request_file, collection_path, environment_name="local")
+        response = executor.execute(request_file, collection_info, environment_name="local")
 
         assert response.status == 200
         call_args = mock_subprocess_success.call_args
@@ -473,14 +493,14 @@ class TestIntegration:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Complete execution with variable overrides."""
         json_data = [{"results": [{"response": {"status": 200, "headers": {}, "data": "test"}}]}]
         mock_open_file.return_value.read.return_value = json.dumps(json_data)
         overrides = {"userId": "456"}
 
-        response = executor.execute(request_file, collection_path, variable_overrides=overrides)
+        response = executor.execute(request_file, collection_info, variable_overrides=overrides)
 
         assert response.status == 200
         call_args = mock_subprocess_success.call_args
@@ -494,13 +514,13 @@ class TestIntegration:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Complete execution without environment selection."""
         json_data = [{"results": [{"response": {"status": 200, "headers": {}, "data": "test"}}]}]
         mock_open_file.return_value.read.return_value = json.dumps(json_data)
 
-        response = executor.execute(request_file, collection_path)
+        response = executor.execute(request_file, collection_info)
 
         assert response.status == 200
         call_args = mock_subprocess_success.call_args
@@ -519,8 +539,12 @@ class TestSubprocessInvocation:
         return Path("users/get-user.bru")
 
     @pytest.fixture
-    def collection_path(self):
-        return Path("/collection")
+    def collection_info(self):
+        return CollectionInfo(
+            name="test",
+            path=Path("/collection"),
+            format=CollectionFormat.BRU,
+        )
 
     @pytest.fixture
     def mock_temp_file(self):
@@ -552,10 +576,10 @@ class TestSubprocessInvocation:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
         """Verifies subprocess.run called with correct command."""
-        executor.execute(request_file, collection_path)
+        executor.execute(request_file, collection_info)
 
         mock_subprocess_success.assert_called_once()
         call_args = mock_subprocess_success.call_args
@@ -571,10 +595,10 @@ class TestSubprocessInvocation:
         mock_temp_file,
         executor,
         request_file,
-        collection_path,
+        collection_info,
     ):
-        """Sets working directory to collection root."""
-        executor.execute(request_file, collection_path)
+        """Sets working directory to collection root (CollectionInfo.path)."""
+        executor.execute(request_file, collection_info)
 
         call_args = mock_subprocess_success.call_args
-        assert call_args[1]["cwd"] == str(collection_path)
+        assert call_args[1]["cwd"] == str(collection_info.path)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from bruno_mcp.executors import CLIExecutor
 from bruno_mcp.models import BruEnvironment, CollectionInfo, RequestExample, RequestMetadata
-from bruno_mcp.parsers import BruParser, EnvParser
+from bruno_mcp.parsers import BruParser, EnvParser, YamlParser
 from bruno_mcp.scanners import CollectionScanner
 from fastmcp import FastMCP
 
@@ -47,15 +47,15 @@ class MCPServer:
         self._register_resources()
         self._register_tools()
 
-    def _active_collection_path(self) -> Path:
-        """Path of the currently active collection."""
+    def _active_collection(self) -> CollectionInfo:
+        """The currently active collection (name, path, and format)."""
         collection = next(
             (c for c in self._collections if c.name == self._active_collection_name),
             None,
         )
         if collection is None:
             raise ValueError(f"Collection not found: {self._active_collection_name}")
-        return collection.path
+        return collection
 
     def _active_collection_metadata(self) -> list[RequestMetadata]:
         """Request metadata for the currently active collection."""
@@ -126,15 +126,21 @@ class MCPServer:
             raise ValueError(f"Directory does not exist: {base_path}")
         found_any = False
         for child in sorted(base_path.iterdir()):
-            if child.is_dir() and (child / "bruno.json").exists():
-                try:
-                    metadata = scanner.scan_collection(child)
-                except ValueError as e:
-                    raise ValueError(str(e)) from e
-                qualified_name = f"{base_path.name}/{child.name}"
-                collections.append(CollectionInfo(name=qualified_name, path=child))
-                collection_metadata[qualified_name] = metadata
-                found_any = True
+            if not child.is_dir():
+                continue
+            try:
+                fmt = scanner.scan_collection_for_format(child)
+            except ValueError:
+                continue
+            qualified_name = f"{base_path.name}/{child.name}"
+            info = CollectionInfo(name=qualified_name, path=child.resolve(), format=fmt)
+            try:
+                metadata = scanner.scan_collection_for_requests(info)
+            except ValueError as e:
+                raise ValueError(str(e)) from e
+            collections.append(info)
+            collection_metadata[qualified_name] = metadata
+            found_any = True
         if not found_any:
             raise ValueError(f"No collections found in {base_path}")
 
@@ -163,8 +169,7 @@ class MCPServer:
         if not paths:
             raise ValueError("BRUNO_COLLECTION_PATH contains no valid paths")
 
-        bru_parser = BruParser()
-        scanner = CollectionScanner(bru_parser)
+        scanner = CollectionScanner(BruParser(), YamlParser())
         collections: list[CollectionInfo] = []
         collection_metadata: dict[str, list[RequestMetadata]] = {}
 
@@ -174,12 +179,18 @@ class MCPServer:
             else:
                 abs_path = Path(path_str).resolve()
                 try:
-                    metadata = scanner.scan_collection(abs_path)
+                    fmt = scanner.scan_collection_for_format(abs_path)
                 except ValueError as e:
                     raise ValueError(str(e)) from e
 
                 name = abs_path.name
-                collections.append(CollectionInfo(name=name, path=abs_path))
+                info = CollectionInfo(name=name, path=abs_path, format=fmt)
+                try:
+                    metadata = scanner.scan_collection_for_requests(info)
+                except ValueError as e:
+                    raise ValueError(str(e)) from e
+
+                collections.append(info)
                 collection_metadata[name] = metadata
 
         names = [c.name for c in collections]
@@ -207,7 +218,7 @@ class MCPServer:
 
         @self._mcp.resource("bruno://environments")
         def environments():
-            envs = self._env_parser.list_environments(self._active_collection_path())
+            envs = self._env_parser.list_environments(self._active_collection())
             return [environment.model_dump() for environment in envs]
 
         @self._mcp.resource("bruno://collections")
@@ -249,7 +260,7 @@ class MCPServer:
             request_file_path = Path(metadata.file_path)
             response = self._executor.execute(
                 request_file_path,
-                self._active_collection_path(),
+                self._active_collection(),
                 environment_name,
                 variable_overrides,
             )
@@ -272,7 +283,7 @@ class MCPServer:
                     - file_path: Relative path to the .bru file
                     - example_call: Ready-to-use run_request_by_id invocation
             """
-            environments = self._env_parser.list_environments(self._active_collection_path())
+            environments = self._env_parser.list_environments(self._active_collection())
             result = []
             for request in self._active_collection_metadata():
                 request.example_call = self._generate_request_example(request, environments)
@@ -291,7 +302,7 @@ class MCPServer:
                 List of dictionaries with "name" (str) and "variables" (dict[str, str]) keys.
                 Returns empty list if no environments found.
             """
-            envs = self._env_parser.list_environments(self._active_collection_path())
+            envs = self._env_parser.list_environments(self._active_collection())
             return [environment.model_dump() for environment in envs]
 
         @self._mcp.tool()

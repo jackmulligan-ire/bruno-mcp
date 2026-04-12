@@ -22,6 +22,12 @@ def sample_collection_dir(fixtures_dir):
 
 
 @pytest.fixture
+def second_collection_dir(fixtures_dir):
+    """Return path to second_collection fixture (e.g. health/check only, no envs)."""
+    return fixtures_dir / "second_collection"
+
+
+@pytest.fixture
 def opencollection_root(fixtures_dir):
     """Return path to minimal OpenCollection root (opencollection.yml only)."""
     return fixtures_dir / "opencollection_root"
