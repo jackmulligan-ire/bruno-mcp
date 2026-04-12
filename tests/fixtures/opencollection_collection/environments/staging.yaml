@@ -1,4 +1,4 @@
-name: local
+name: staging
 variables:
   - name: baseUrl
     value: http://localhost:3000
