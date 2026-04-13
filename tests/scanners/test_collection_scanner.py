@@ -267,19 +267,13 @@ class TestScanCollectionForFormat:
 
         assert scanner.scan_collection_for_format(root) == CollectionFormat.OPENCOLLECTION
 
-    def test_scan_for_format_raises_when_both_markers_present(
+    def test_scan_for_format_returns_opencollection_when_both_markers_present(
         self, bru_parser, yaml_parser, mixed_collection_markers: Path
     ):
         scanner = CollectionScanner(bru_parser, yaml_parser)
         root = mixed_collection_markers.resolve()
 
-        with pytest.raises(ValueError) as exc_info:
-            scanner.scan_collection_for_format(root)
-
-        message = str(exc_info.value)
-        assert "bruno.json" in message
-        assert "opencollection.yml" in message
-        assert str(root) in message
+        assert scanner.scan_collection_for_format(root) == CollectionFormat.OPENCOLLECTION
 
     def test_scan_for_requests_returns_empty_for_empty_opencollection_root(
         self, bru_parser, yaml_parser, opencollection_root: Path

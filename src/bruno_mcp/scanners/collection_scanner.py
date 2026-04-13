@@ -183,27 +183,20 @@ class CollectionScanner:
             collection_path: Path to Bruno collection root directory.
 
         Returns:
-            Bru layout if ``bruno.json`` exists, OpenCollection if ``opencollection.yml`` exists.
+            OpenCollection if ``opencollection.yml`` exists (takes precedence over ``bruno.json``),
+            otherwise Bru layout if ``bruno.json`` exists.
 
         Raises:
-            ValueError: If both markers exist, if neither exists, or the path is ambiguous.
+            ValueError: If neither marker exists.
         """
         abs_path = collection_path.resolve()
         has_bru = (abs_path / "bruno.json").exists()
         has_oc = (abs_path / "opencollection.yml").exists()
 
-        if has_bru and has_oc:
-            raise ValueError(
-                "This folder contains both bruno.json and opencollection.yml, which indicate "
-                "two different collection formats (classic .bru vs OpenCollection YAML). "
-                "Remove one of these files so the collection has a single format. Path: "
-                f"{abs_path}"
-            )
-
+        if has_oc:
+            return CollectionFormat.OPENCOLLECTION
         elif has_bru:
             return CollectionFormat.BRU
-        elif has_oc:
-            return CollectionFormat.OPENCOLLECTION
         raise ValueError(f"Not a valid Bruno collection: {abs_path}")
 
     def scan_collection_for_requests(self, collection_info: CollectionInfo) -> list[RequestMetadata]:
