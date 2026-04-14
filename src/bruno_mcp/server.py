@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import os
 import subprocess
+from pathlib import Path
 
 from bruno_mcp.executors import CLIExecutor
-from bruno_mcp.models import RequestMetadata
-from bruno_mcp.parsers import BruParser, EnvParser
+from bruno_mcp.models import BruEnvironment, CollectionInfo, RequestExample, RequestMetadata
+from bruno_mcp.parsers import BruParser, EnvParser, YamlParser
 from bruno_mcp.scanners import CollectionScanner
 from fastmcp import FastMCP
 
@@ -15,34 +15,75 @@ class MCPServer:
     """MCP server for Bruno API collections.
 
     Provides Model Context Protocol (MCP) resources and tools for discovering
-    and executing Bruno API requests. Scans a Bruno collection directory for
-    .bru files and exposes them as MCP resources and executable tools.
+    and executing Bruno API requests. Supports multiple collections with an
+    active collection that tools and resources operate on.
     """
 
     def __init__(
         self,
-        collection_path: Path,
+        collections: list[CollectionInfo],
+        collection_metadata: dict[str, list[RequestMetadata]],
         executor: CLIExecutor,
-        collection_metadata: list[RequestMetadata],
         mcp: FastMCP,
         env_parser: EnvParser,
     ):
         """Initialize MCP server with dependencies.
 
         Args:
-            collection_path: Path to Bruno collection directory.
+            collections: List of loaded collection info.
+            collection_metadata: Metadata keyed by collection name.
             executor: CLI executor for HTTP requests.
-            collection_metadata: Pre-scanned list of request metadata.
             mcp: FastMCP instance for MCP protocol handling.
             env_parser: Parser for environment files.
         """
-        self._collection_path = collection_path
-        self._executor = executor
+        if not collections:
+            raise ValueError("At least one collection is required")
+        self._collections = collections
         self._collection_metadata = collection_metadata
+        self._executor = executor
         self._mcp = mcp
         self._env_parser = env_parser
+        self._active_collection_name = collections[0].name
         self._register_resources()
         self._register_tools()
+
+    def _active_collection(self) -> CollectionInfo:
+        """The currently active collection (name, path, and format)."""
+        collection = next(
+            (c for c in self._collections if c.name == self._active_collection_name),
+            None,
+        )
+        if collection is None:
+            raise ValueError(f"Collection not found: {self._active_collection_name}")
+        return collection
+
+    def _active_collection_metadata(self) -> list[RequestMetadata]:
+        """Request metadata for the currently active collection."""
+        return self._collection_metadata.get(self._active_collection_name, [])
+
+    def _generate_request_example(
+        self,
+        request: RequestMetadata,
+        environments: list[BruEnvironment],
+    ) -> RequestExample:
+        """
+        Build a RequestExample for the given request and available environments.
+        Returns any variables that are available in all environments that the request uses.
+        """
+        if not environments:
+            return RequestExample(request_id=request.id)
+
+        env_var_names: set[str] = set()
+        for env in environments:
+            env_var_names.update(env.variables.keys())
+
+        overridable = sorted(name for name in request.variable_names if name in env_var_names)
+
+        return RequestExample(
+            request_id=request.id,
+            environment_name=environments[0].name,
+            variable_overrides={name: f"<{name}>" for name in overridable} if overridable else None,
+        )
 
     @property
     def mcp(self) -> FastMCP:
@@ -73,34 +114,97 @@ class MCPServer:
             )
 
     @classmethod
+    def _load_directory_collections(
+        cls,
+        path_str: str,
+        scanner: CollectionScanner,
+        collections: list[CollectionInfo],
+        collection_metadata: dict[str, list[RequestMetadata]],
+    ) -> None:
+        base_path = Path(path_str[:-2].rstrip("/")).resolve()
+        if not base_path.is_dir():
+            raise ValueError(f"Directory does not exist: {base_path}")
+        found_any = False
+        for child in sorted(base_path.iterdir()):
+            if not child.is_dir():
+                continue
+            try:
+                fmt = scanner.scan_collection_for_format(child)
+            except ValueError:
+                continue
+            qualified_name = f"{base_path.name}/{child.name}"
+            info = CollectionInfo(name=qualified_name, path=child.resolve(), format=fmt)
+            try:
+                metadata = scanner.scan_collection_for_requests(info)
+            except ValueError as e:
+                raise ValueError(str(e)) from e
+            collections.append(info)
+            collection_metadata[qualified_name] = metadata
+            found_any = True
+        if not found_any:
+            raise ValueError(f"No collections found in {base_path}")
+
+    @classmethod
     def create(cls) -> "MCPServer":
         """Create MCPServer instance from environment configuration.
 
-        Reads BRUNO_COLLECTION_PATH from environment, scans collection,
-        validates CLI availability, and initializes server with CLIExecutor.
+        Reads BRUNO_COLLECTION_PATH from environment (supports multiple paths
+        separated by os.pathsep), scans each collection, validates CLI availability,
+        and initializes server with CLIExecutor.
 
         Returns:
             Configured MCPServer instance.
 
         Raises:
-            ValueError: If BRUNO_COLLECTION_PATH environment variable is not set.
+            ValueError: If BRUNO_COLLECTION_PATH is not set or a path is invalid.
             RuntimeError: If Bruno CLI is not available.
         """
-        collection_path = os.environ.get("BRUNO_COLLECTION_PATH")
-        if not collection_path:
+        collection_paths_env = os.environ.get("BRUNO_COLLECTION_PATH")
+        if not collection_paths_env:
             raise ValueError("BRUNO_COLLECTION_PATH not set")
 
         cls._validate_cli()
 
-        abs_collection_path = Path(collection_path).resolve()
-        bru_parser = BruParser()
-        scanner = CollectionScanner(bru_parser)
-        collection_metadata = scanner.scan_collection(abs_collection_path)
+        paths = [p.strip() for p in collection_paths_env.split(os.pathsep) if p.strip()]
+        if not paths:
+            raise ValueError("BRUNO_COLLECTION_PATH contains no valid paths")
+
+        scanner = CollectionScanner(BruParser(), YamlParser())
+        collections: list[CollectionInfo] = []
+        collection_metadata: dict[str, list[RequestMetadata]] = {}
+
+        for path_str in paths:
+            if path_str.endswith("/*"):
+                cls._load_directory_collections(path_str, scanner, collections, collection_metadata)
+            else:
+                abs_path = Path(path_str).resolve()
+                try:
+                    fmt = scanner.scan_collection_for_format(abs_path)
+                except ValueError as e:
+                    raise ValueError(str(e)) from e
+
+                name = abs_path.name
+                info = CollectionInfo(name=name, path=abs_path, format=fmt)
+                try:
+                    metadata = scanner.scan_collection_for_requests(info)
+                except ValueError as e:
+                    raise ValueError(str(e)) from e
+
+                collections.append(info)
+                collection_metadata[name] = metadata
+
+        names = [c.name for c in collections]
+        if len(names) != len(set(names)):
+            seen: set[str] = set()
+            for n in names:
+                if n in seen:
+                    raise ValueError(f"Duplicate collection name: {n}")
+                seen.add(n)
 
         return cls(
-            collection_path=abs_collection_path,
-            executor=CLIExecutor(),
+            collections=collections,
             collection_metadata=collection_metadata,
+            executor=CLIExecutor(),
             mcp=FastMCP("bruno-mcp"),
             env_parser=EnvParser(),
         )
@@ -108,14 +212,21 @@ class MCPServer:
     def _register_resources(self):
         """Register MCP resources with the FastMCP instance."""
 
-        @self._mcp.resource("bruno://collection")
-        def collection_tree():
-            return [request.model_dump() for request in self._collection_metadata]
+        @self._mcp.resource("bruno://collection_metadata")
+        def collection_metadata():
+            return [request.model_dump() for request in self._active_collection_metadata()]
 
         @self._mcp.resource("bruno://environments")
         def environments():
-            environments = self._env_parser.list_environments(self._collection_path)
-            return [env.model_dump() for env in environments]
+            envs = self._env_parser.list_environments(self._active_collection())
+            return [environment.model_dump() for environment in envs]
+
+        @self._mcp.resource("bruno://collections")
+        def collections():
+            return [
+                {"name": collection.name, "path": str(collection.path)}
+                for collection in self._collections
+            ]
 
     def _register_tools(self):
         """Register MCP tools with the FastMCP instance."""
@@ -139,14 +250,17 @@ class MCPServer:
             Raises:
                 ValueError: If request_id is not found in the collection.
             """
-            metadata = next((m for m in self._collection_metadata if m.id == request_id), None)
+            metadata = next(
+                (m for m in self._active_collection_metadata() if m.id == request_id),
+                None,
+            )
             if not metadata:
                 raise ValueError(f"Request not found: {request_id}")
 
             request_file_path = Path(metadata.file_path)
             response = self._executor.execute(
                 request_file_path,
-                self._collection_path,
+                self._active_collection(),
                 environment_name,
                 variable_overrides,
             )
@@ -154,7 +268,7 @@ class MCPServer:
 
         @self._mcp.tool()
         def list_requests():
-            """List all available Bruno requests in the collection.
+            """List all available Bruno requests in the active collection.
 
             Returns a list of all discovered requests with their metadata including
             ID, name, HTTP method, URL (with variable placeholders), and file path.
@@ -167,12 +281,19 @@ class MCPServer:
                     - method: HTTP method (GET, POST, PUT, DELETE, etc.)
                     - url: Request URL (may contain {{variable}} placeholders)
                     - file_path: Relative path to the .bru file
+                    - example_call: Ready-to-use run_request_by_id invocation
             """
-            return [request.model_dump() for request in self._collection_metadata]
+            environments = self._env_parser.list_environments(self._active_collection())
+            result = []
+            for request in self._active_collection_metadata():
+                request.example_call = self._generate_request_example(request, environments)
+                request_output = request.model_dump()
+                result.append(request_output)
+            return result
 
         @self._mcp.tool()
         def list_environments():
-            """List all available environments in the collection.
+            """List all available environments in the active collection.
 
             Scans the collection's environments directory for .bru files
             and returns a list of environment dictionaries with name and variables.
@@ -181,5 +302,39 @@ class MCPServer:
                 List of dictionaries with "name" (str) and "variables" (dict[str, str]) keys.
                 Returns empty list if no environments found.
             """
-            environments = self._env_parser.list_environments(self._collection_path)
-            return [env.model_dump() for env in environments]
+            envs = self._env_parser.list_environments(self._active_collection())
+            return [environment.model_dump() for environment in envs]
+
+        @self._mcp.tool()
+        def list_collections():
+            """List all loaded Bruno collections.
+
+            Returns a list of collections with name and path. Use set_active_collection
+            to switch which collection tools operate on.
+
+            Returns:
+                List of dictionaries with "name" (str) and "path" (str) keys.
+            """
+            return [
+                {"name": collection.name, "path": str(collection.path)}
+                for collection in self._collections
+            ]
+
+        @self._mcp.tool()
+        def set_active_collection(collection_name: str):
+            """Set the active collection for tools and resources.
+
+            Args:
+                collection_name: Name of the collection to activate (basename of path).
+
+            Returns:
+                The name of the newly active collection, so the caller (e.g. an MCP agent)
+                can confirm which collection is now active.
+
+            Raises:
+                ValueError: If collection_name is not found.
+            """
+            if not any(collection.name == collection_name for collection in self._collections):
+                raise ValueError(f"Collection not found: {collection_name}")
+            self._active_collection_name = collection_name
+            return collection_name

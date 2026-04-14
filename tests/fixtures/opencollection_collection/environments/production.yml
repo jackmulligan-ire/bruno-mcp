@@ -1,0 +1,12 @@
+name: production
+variables:
+  - name: baseUrl
+    value: https://api.example.com
+    enabled: true
+    secret: false
+    type: text
+  - name: disabled_var
+    value: should_not_appear
+    enabled: false
+    secret: false
+    type: text

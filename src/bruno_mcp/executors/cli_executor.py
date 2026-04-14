@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from bruno_mcp.models import BruResponse
+from bruno_mcp.models import BruResponse, CollectionInfo
 
 
 class CLIExecutor:
@@ -81,15 +81,15 @@ class CLIExecutor:
     def execute(
         self,
         request_file_path: Path,
-        collection_path: Path,
+        collection: CollectionInfo,
         environment_name: Optional[str] = None,
         variable_overrides: Optional[dict[str, str]] = None,
     ) -> BruResponse:
         """Execute request via Bruno CLI.
 
         Args:
-            request_file_path: Path to .bru file (relative to collection_path).
-            collection_path: Root of Bruno collection directory.
+            request_file_path: Path to request file (relative to collection root).
+            collection: Loaded collection whose ``path`` is used as the working directory.
             environment_name: Optional environment name to use.
             variable_overrides: Optional dict of variable overrides.
 
@@ -104,20 +104,20 @@ class CLIExecutor:
             temp_output = Path(f.name)
 
         try:
-            cmd = self._build_command(request_file_path, environment_name, variable_overrides, temp_output)
+            cmd = self._build_command(
+                request_file_path, environment_name, variable_overrides, temp_output
+            )
 
             result = subprocess.run(
                 cmd,
-                cwd=str(collection_path),
+                cwd=str(collection.path),
                 capture_output=True,
                 text=True,
                 check=False,
             )
 
             if result.returncode != 0:
-                raise RuntimeError(
-                    f"Bruno CLI failed: {result.stderr}\nCommand: {' '.join(cmd)}"
-                )
+                raise RuntimeError(f"Bruno CLI failed: {result.stderr}\nCommand: {' '.join(cmd)}")
 
             with open(temp_output) as f:
                 cli_results = json.loads(f.read())
@@ -136,7 +136,7 @@ class CLIExecutor:
                 body=body,
             )
         except FileNotFoundError as e:
-                raise RuntimeError(f"Bruno CLI failed: {e}") from e
+            raise RuntimeError(f"Bruno CLI failed: {e}") from e
         finally:
             if temp_output.exists():
                 temp_output.unlink()

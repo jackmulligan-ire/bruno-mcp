@@ -2,48 +2,213 @@
 
 import os
 from pathlib import Path
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 
 from bruno_mcp import MCPServer
 from bruno_mcp.executors import CLIExecutor
-from bruno_mcp.models import BruEnvironment, BruResponse, RequestMetadata
+from bruno_mcp.models import (
+    BruEnvironment,
+    BruResponse,
+    CollectionFormat,
+    CollectionInfo,
+    RequestMetadata,
+)
 from bruno_mcp.parsers import EnvParser
 
 
-class TestCollectionTreeResource:
-    """Test collection_tree MCP resource registration and handler."""
+@pytest.fixture
+def collection_paths(fixtures_dir):
+    """All collection-related paths. Use paths.sample_collection, paths.second_collection, etc."""
+    return SimpleNamespace(
+        sample_collection=fixtures_dir / "sample_collection",
+        second_collection=fixtures_dir / "second_collection",
+        collection_directory=fixtures_dir / "collection_directory",
+        empty_collection_dir=fixtures_dir / "empty_collection_dir",
+        collision_a_parent=fixtures_dir / "collision_a" / "parent",
+        collision_b_parent=fixtures_dir / "collision_b" / "parent",
+        opencollection_collection=fixtures_dir / "opencollection_collection",
+    )
 
-    @pytest.fixture
-    def mock_mcp(self):
-        """Mock FastMCP instance for resource registration tests."""
-        return Mock()
 
-    @pytest.fixture
-    def mock_executor(self):
-        """Mock executor for MCPServer initialization."""
-        return Mock()
+@pytest.fixture
+def collection_metadata():
+    """Metadata for each collection, indexed to match collection_paths. [0]=sample_collection, [1]=second_collection."""
+    return [
+        [
+            RequestMetadata(
+                id="users/get-user",
+                name="Get User",
+                method="GET",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/get-user.bru",
+            )
+        ],
+        [
+            RequestMetadata(
+                id="health/check",
+                name="Health Check",
+                method="GET",
+                url="https://api.example.com/health",
+                file_path="health/check.bru",
+            )
+        ],
+    ]
 
-    @pytest.fixture
-    def empty_collection_metadata(self):
-        """Empty collection metadata for basic tests."""
-        return []
 
-    def test_resource_registered_with_correct_uri(self, mock_mcp, mock_executor, empty_collection_metadata):
-        """Test _register_resources calls mcp.resource() with bruno://collection."""
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=empty_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+def _patch_bruno_env_star_path(path):
+    """Context manager to set BRUNO_COLLECTION_PATH to path/*."""
+    return patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": f"{path}/*"})
 
-        mock_mcp.resource.assert_any_call("bruno://collection")
 
-    def test_collection_tree_handler_returns_all_requests(self, mock_mcp, mock_executor):
-        """Test collection_tree handler returns all requests from collection_metadata."""
+@pytest.fixture
+def bruno_env_single_path(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to a single collection for the duration of the test."""
+    with patch.dict(
+        os.environ, {"BRUNO_COLLECTION_PATH": str(collection_paths.sample_collection)}
+    ):
+        yield
+
+
+@pytest.fixture
+def bruno_env_two_paths(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to two collections for the duration of the test."""
+    env_val = f"{collection_paths.sample_collection}{os.pathsep}{collection_paths.second_collection}"
+    with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": env_val}):
+        yield
+
+
+@pytest.fixture
+def bruno_env_opencollection_path(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to the OpenCollection YAML fixture root."""
+    with patch.dict(
+        os.environ, {"BRUNO_COLLECTION_PATH": str(collection_paths.opencollection_collection)}
+    ):
+        yield
+
+
+@pytest.fixture
+def bruno_env_bru_and_opencollection_path(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to classic BRU then OpenCollection roots (two paths)."""
+    env_val = (
+        f"{collection_paths.sample_collection}{os.pathsep}"
+        f"{collection_paths.opencollection_collection}"
+    )
+    with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": env_val}):
+        yield
+
+
+@pytest.fixture
+def bruno_env_invalid_path(invalid_fixtures_dir):
+    """Set BRUNO_COLLECTION_PATH to an invalid path for the duration of the test."""
+    with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": str(invalid_fixtures_dir)}):
+        yield
+
+
+@pytest.fixture
+def bruno_env_star_path(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to a collection directory path (/*) for the duration of the test."""
+    with _patch_bruno_env_star_path(collection_paths.collection_directory):
+        yield
+
+
+@pytest.fixture
+def bruno_env_mixed_paths(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to explicit path + collection directory (/*) for the duration of the test."""
+    env_val = f"{collection_paths.sample_collection}{os.pathsep}{collection_paths.collection_directory}/*"
+    with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": env_val}):
+        yield
+
+
+@pytest.fixture
+def bruno_env_empty_star_path(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to a directory with no valid subcollections (/*) for the duration of the test."""
+    with _patch_bruno_env_star_path(collection_paths.empty_collection_dir):
+        yield
+
+
+@pytest.fixture
+def bruno_env_collision_paths(collection_paths):
+    """Set BRUNO_COLLECTION_PATH to two /* paths that yield the same qualified collection name."""
+    env_val = f"{collection_paths.collision_a_parent}/*{os.pathsep}{collection_paths.collision_b_parent}/*"
+    with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": env_val}):
+        yield
+
+
+# --- Helpers ---
+
+
+def _create_server(
+    mock_mcp,
+    mock_executor,
+    scanner_metadata,
+    mock_env_parser=None,
+    mock_cli_executor=None,
+):
+    """Create server via MCPServer.create() with patched dependencies."""
+    executor = mock_cli_executor if mock_cli_executor is not None else mock_executor
+    with patch("bruno_mcp.server.FastMCP") as mock_fastmcp, patch(
+        "bruno_mcp.server.CLIExecutor", return_value=executor
+    ), patch("bruno_mcp.server.subprocess") as mock_subprocess, patch(
+        "bruno_mcp.server.CollectionScanner"
+    ) as mock_scanner_class:
+        mock_fastmcp.return_value = mock_mcp
+        mock_scanner = mock_scanner_class.return_value
+        mock_scanner.scan_collection_for_format.return_value = CollectionFormat.BRU
+        if len(scanner_metadata) == 1:
+            mock_scanner.scan_collection_for_requests.return_value = scanner_metadata[0]
+        else:
+            mock_scanner.scan_collection_for_requests.side_effect = scanner_metadata
+        mock_subprocess.run.return_value.returncode = 0
+        if mock_env_parser is not None:
+            with patch("bruno_mcp.server.EnvParser", return_value=mock_env_parser):
+                return MCPServer.create()
+        return MCPServer.create()
+
+
+def _list_collections_via_tool(server):
+    """Invoke the list_collections tool handler (public API) to get collection data."""
+    tool_decorator = server.mcp.tool.return_value
+    list_collections_handler = tool_decorator.call_args_list[3][0][0]
+    return list_collections_handler()
+
+
+class TestMCPServerInit:
+    """Test MCPServer.__init__ validation."""
+
+    def test_init_raises_error_for_empty_collections(self, mock_mcp, mock_executor):
+        """Test MCPServer.__init__ raises when collections list is empty."""
+        with pytest.raises(ValueError, match="At least one collection"):
+            MCPServer(
+                collections=[],
+                collection_metadata={},
+                executor=mock_executor,
+                mcp=mock_mcp,
+                env_parser=EnvParser(),
+            )
+
+
+class TestCollectionMetadataResource:
+    """Test bruno://collection_metadata resource (request metadata for the active collection).
+
+    This resource returns the list of requests in the currently active collection,
+    i.e. the metadata for all .bru files. Distinct from TestCollectionsResource
+    which tests the list of loaded collections themselves.
+    """
+
+    def test_resource_registered_with_correct_uri(
+        self, mock_mcp, mock_executor, bruno_env_single_path
+    ):
+        """Test _register_resources calls mcp.resource() with bruno://collection_metadata."""
+        _create_server(mock_mcp, mock_executor, [[]])
+        mock_mcp.resource.assert_any_call("bruno://collection_metadata")
+
+    def test_collection_metadata_handler_returns_all_requests(
+        self, mock_mcp, mock_executor, bruno_env_single_path
+    ):
+        """Test collection_metadata handler returns requests from active collection."""
         expected_requests = [
             RequestMetadata(
                 id="users/get-user",
@@ -61,44 +226,24 @@ class TestCollectionTreeResource:
             ),
         ]
 
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=expected_requests,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_executor, [expected_requests])
 
         resource_decorator = mock_mcp.resource.return_value
-        collection_tree_handler = resource_decorator.call_args_list[0][0][0]
-        collection_tree = collection_tree_handler()
-        assert len(collection_tree) == 2
-        assert collection_tree[0]["id"] == "users/get-user"
-        assert collection_tree[1]["id"] == "users/create-user"
+        collection_metadata_handler = resource_decorator.call_args_list[0][0][0]
+        collection_metadata = collection_metadata_handler()
+        assert len(collection_metadata) == 2
+        assert collection_metadata[0]["id"] == "users/get-user"
+        assert collection_metadata[1]["id"] == "users/create-user"
 
-    def test_collection_tree_handler_includes_complete_metadata(self, mock_mcp, mock_executor):
-        """Test collection_tree handler returns all required metadata fields."""
-        expected_requests = [
-            RequestMetadata(
-                id="users/get-user",
-                name="Get User",
-                method="GET",
-                url="https://api.example.com/users/{{userId}}",
-                file_path="users/get-user.bru",
-            )
-        ]
-        
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=expected_requests,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+    def test_collection_metadata_handler_includes_complete_metadata(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
+        """Test collection_metadata handler returns all required metadata fields."""
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
 
         resource_decorator = mock_mcp.resource.return_value
-        handler = resource_decorator.call_args_list[0][0][0]
-        result = handler()
+        collection_metadata_handler = resource_decorator.call_args_list[0][0][0]
+        result = collection_metadata_handler()
         request = result[0]
         assert request["id"] == "users/get-user"
         assert request["name"] == "Get User"
@@ -108,80 +253,85 @@ class TestCollectionTreeResource:
 
 
 class TestEnvironmentsResource:
-    """Test environments MCP resource registration and handler."""
-
-    @pytest.fixture
-    def mock_mcp(self):
-        """Mock FastMCP instance for resource registration tests."""
-        return Mock()
-
-    @pytest.fixture
-    def mock_executor(self):
-        """Mock executor for MCPServer initialization."""
-        return Mock()
+    """Test bruno://environments resource (environments for the active collection)."""
 
     @pytest.fixture
     def mock_env_parser(self):
         """Mock EnvParser instance for environment discovery."""
         return Mock()
 
-    @pytest.fixture
-    def empty_collection_metadata(self):
-        """Empty collection metadata for basic tests."""
-        return []
-
-    def test_environments_resource_registered_with_correct_uri(self, mock_mcp, mock_executor, mock_env_parser, empty_collection_metadata):
+    def test_environments_resource_registered_with_correct_uri(
+        self,
+        mock_mcp,
+        mock_executor,
+        mock_env_parser,
+        bruno_env_single_path,
+    ):
         """Test _register_resources calls mcp.resource() with bruno://environments."""
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=empty_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=mock_env_parser,
-        )
-
+        _create_server(mock_mcp, mock_executor, [[]], mock_env_parser=mock_env_parser)
         mock_mcp.resource.assert_any_call("bruno://environments")
 
-    def test_environments_resource_handler_returns_all_environments(self, mock_mcp, mock_executor, mock_env_parser, sample_collection_dir):
-        """Test handler returns all environments from EnvParser.list_environments()."""
+    def test_environments_resource_handler_returns_all_environments(
+        self,
+        mock_mcp,
+        mock_executor,
+        mock_env_parser,
+        collection_paths,
+        bruno_env_single_path,
+    ):
+        """Test handler returns environments from active collection."""
         expected_environments = [
-            BruEnvironment(name="local", variables={"baseUrl": "http://localhost:3000", "apiVersion": "v1"}),
-            BruEnvironment(name="production", variables={"baseUrl": "https://api.example.com", "apiKey": "{{process.env.API_KEY}}"}),
+            BruEnvironment(
+                name="local", variables={"baseUrl": "http://localhost:3000", "apiVersion": "v1"}
+            ),
+            BruEnvironment(
+                name="production",
+                variables={
+                    "baseUrl": "https://api.example.com",
+                    "apiKey": "{{process.env.API_KEY}}",
+                },
+            ),
         ]
         mock_env_parser.list_environments.return_value = expected_environments
-        MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_executor,
-            collection_metadata=[],
-            mcp=mock_mcp,
-            env_parser=mock_env_parser,
-        )
+        _create_server(mock_mcp, mock_executor, [[]], mock_env_parser=mock_env_parser)
+
         resource_decorator = mock_mcp.resource.return_value
         environments_handler = resource_decorator.call_args_list[1][0][0]
-
         environments = environments_handler()
 
         assert len(environments) == 2
         assert environments[0]["name"] == "local"
         assert environments[1]["name"] == "production"
-        mock_env_parser.list_environments.assert_called_once_with(sample_collection_dir)
+        mock_env_parser.list_environments.assert_called_once_with(
+            CollectionInfo(
+                name="sample_collection",
+                path=collection_paths.sample_collection.resolve(),
+                format=CollectionFormat.BRU,
+            )
+        )
 
-    def test_environments_resource_includes_name_and_variables_with_secrets(self, mock_mcp, mock_executor, mock_env_parser, sample_collection_dir):
+    def test_environments_resource_includes_name_and_variables_with_secrets(
+        self,
+        mock_mcp,
+        mock_executor,
+        mock_env_parser,
+        bruno_env_single_path,
+    ):
         """Test each environment includes name and variables dict with secrets as templates."""
         expected_environments = [
-            BruEnvironment(name="local", variables={"baseUrl": "http://localhost:3000", "authToken": "{{process.env.SECRET_TOKEN}}"}),
+            BruEnvironment(
+                name="local",
+                variables={
+                    "baseUrl": "http://localhost:3000",
+                    "authToken": "{{process.env.SECRET_TOKEN}}",
+                },
+            ),
         ]
         mock_env_parser.list_environments.return_value = expected_environments
-        server = MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_executor,
-            collection_metadata=[],
-            mcp=mock_mcp,
-            env_parser=mock_env_parser,
-        )
+        _create_server(mock_mcp, mock_executor, [[]], mock_env_parser=mock_env_parser)
+
         resource_decorator = mock_mcp.resource.return_value
         environments_handler = resource_decorator.call_args_list[1][0][0]
-
         environments = environments_handler()
 
         environment = environments[0]
@@ -189,6 +339,54 @@ class TestEnvironmentsResource:
         assert "variables" in environment
         assert environment["variables"]["baseUrl"] == "http://localhost:3000"
         assert environment["variables"]["authToken"] == "{{process.env.SECRET_TOKEN}}"
+
+
+class TestCollectionsResource:
+    """Test bruno://collections resource (list of loaded collections).
+
+    This resource returns all collections that were loaded at startup, with name
+    and path. Distinct from TestCollectionMetadataResource which tests the request
+    tree within the active collection.
+    """
+
+    def test_collections_resource_registered_with_correct_uri(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
+        """Test _register_resources calls mcp.resource() with bruno://collections."""
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
+        mock_mcp.resource.assert_any_call("bruno://collections")
+
+    def test_collections_resource_returns_all_collections(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_two_paths
+    ):
+        """Test handler returns name and path for each collection."""
+        _create_server(
+            mock_mcp, mock_executor, [collection_metadata[0], collection_metadata[1]]
+        )
+
+        resource_decorator = mock_mcp.resource.return_value
+        collections_handler = resource_decorator.call_args_list[2][0][0]
+        result = collections_handler()
+
+        assert len(result) == 2
+        assert result[0]["name"] == "sample_collection"
+        assert "path" in result[0]
+        assert result[1]["name"] == "second_collection"
+        assert "path" in result[1]
+
+    def test_collections_resource_works_with_single_collection(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
+        """Test single collection returns one entry."""
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
+
+        resource_decorator = mock_mcp.resource.return_value
+        collections_handler = resource_decorator.call_args_list[2][0][0]
+        result = collections_handler()
+
+        assert len(result) == 1
+        assert result[0]["name"] == "sample_collection"
+        assert "path" in result[0]
 
 
 class TestServerCreate:
@@ -224,16 +422,17 @@ class TestServerCreate:
         with patch("bruno_mcp.server.FastMCP") as mock:
             yield mock
 
-    def test_create_scans_collection_and_passes_metadata(
+    def test_create_single_path_backward_compatible(
         self,
         mock_cli_executor_class,
         mock_fastmcp,
-        mock_scanner_class,
         mock_parser_class,
+        mock_scanner_class,
         mock_subprocess,
-        sample_collection_dir,
+        collection_paths,
+        bruno_env_single_path,
     ):
-        """Test create() scans collection and passes metadata to __init__."""
+        """Test single path loads one collection, first is active, metadata passed."""
         mock_parser_instance = mock_parser_class.return_value
         mock_scanner_instance = mock_scanner_class.return_value
         expected_metadata = [
@@ -245,16 +444,81 @@ class TestServerCreate:
                 file_path="users/get-user.bru",
             )
         ]
-        mock_scanner_instance.scan_collection.return_value = expected_metadata
+        mock_scanner_instance.scan_collection_for_format.return_value = CollectionFormat.BRU
+        mock_scanner_instance.scan_collection_for_requests.return_value = expected_metadata
         mock_subprocess.run.return_value.returncode = 0
 
         server = MCPServer.create()
 
-        assert server._collection_path.resolve() == sample_collection_dir
+        collections = _list_collections_via_tool(server)
+        assert len(collections) == 1
+        assert collections[0]["name"] == "sample_collection"
+        assert (
+            Path(collections[0]["path"]).resolve()
+            == collection_paths.sample_collection.resolve()
+        )
+        list_requests_handler = server.mcp.tool.return_value.call_args_list[1][0][0]
+        assert list_requests_handler() == [r.model_dump() for r in expected_metadata]
         mock_parser_class.assert_called_once()
-        mock_scanner_class.assert_called_once_with(mock_parser_instance)
-        mock_scanner_instance.scan_collection.assert_called_once_with(sample_collection_dir)
-        assert server._collection_metadata == expected_metadata
+        mock_scanner_class.assert_called_once_with(mock_parser_instance, ANY)
+        mock_scanner_instance.scan_collection_for_format.assert_called_once_with(
+            collection_paths.sample_collection.resolve()
+        )
+        mock_scanner_instance.scan_collection_for_requests.assert_called_once_with(
+            CollectionInfo(
+                name="sample_collection",
+                path=collection_paths.sample_collection.resolve(),
+                format=CollectionFormat.BRU,
+            )
+        )
+
+    def test_create_multiple_paths_loads_all_collections(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_two_paths,
+    ):
+        """Test colon-separated paths load multiple collections, first is active."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.return_value = CollectionFormat.BRU
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [RequestMetadata(id="a", name="A", method="GET", url="u", file_path="a.bru")],
+            [RequestMetadata(id="b", name="B", method="GET", url="u", file_path="b.bru")],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        server = MCPServer.create()
+
+        collections = _list_collections_via_tool(server)
+        assert len(collections) == 2
+        assert collections[0]["name"] == "sample_collection"
+        assert collections[1]["name"] == "second_collection"
+        assert mock_scanner_instance.scan_collection_for_format.call_count == 2
+        assert mock_scanner_instance.scan_collection_for_requests.call_count == 2
+
+    def test_create_raises_error_for_invalid_collection_path(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        invalid_fixtures_dir,
+        bruno_env_invalid_path,
+    ):
+        """Test path without bruno.json raises ValueError with path in message."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = ValueError(
+            f"Not a valid Bruno collection: {invalid_fixtures_dir}"
+        )
+        mock_subprocess.run.return_value.returncode = 0
+
+        with pytest.raises(ValueError) as exc_info:
+            MCPServer.create()
+
+        assert "Not a valid Bruno collection" in str(exc_info.value)
+        assert str(invalid_fixtures_dir) in str(exc_info.value)
 
     def test_create_uses_cli_executor_and_validates_cli(
         self,
@@ -262,13 +526,15 @@ class TestServerCreate:
         mock_fastmcp,
         mock_scanner_class,
         mock_subprocess,
+        bruno_env_single_path,
     ):
         """Test CLIExecutor used and CLI validated at startup."""
         mock_scanner_instance = mock_scanner_class.return_value
-        mock_scanner_instance.scan_collection.return_value = []
+        mock_scanner_instance.scan_collection_for_format.return_value = CollectionFormat.BRU
+        mock_scanner_instance.scan_collection_for_requests.return_value = []
         mock_subprocess.run.return_value.returncode = 0
 
-        server = MCPServer.create()
+        MCPServer.create()
 
         mock_cli_executor_class.assert_called_once()
         mock_subprocess.run.assert_called_once()
@@ -276,11 +542,12 @@ class TestServerCreate:
         assert call_args[0][0] == ["bru", "--version"]
 
     def test_create_raises_error_when_cli_not_found(
-        self, mock_scanner_class, mock_subprocess
+        self, mock_scanner_class, mock_subprocess, bruno_env_single_path
     ):
         """Test error when Bruno CLI unavailable."""
         mock_scanner_instance = mock_scanner_class.return_value
-        mock_scanner_instance.scan_collection.return_value = []
+        mock_scanner_instance.scan_collection_for_format.return_value = CollectionFormat.BRU
+        mock_scanner_instance.scan_collection_for_requests.return_value = []
         mock_subprocess.run.side_effect = FileNotFoundError("bru: command not found")
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -291,48 +558,338 @@ class TestServerCreate:
     @patch.dict(os.environ, {}, clear=True)
     def test_create_raises_error_without_collection_path(self):
         """Test MCPServer.create() raises error when BRUNO_COLLECTION_PATH not set."""
-        with pytest.raises(ValueError, match="BRUNO_COLLECTION_PATH"):
+        with pytest.raises(ValueError, match="BRUNO_COLLECTION_PATH not set"):
             MCPServer.create()
+
+    def test_create_raises_error_when_paths_empty_after_split(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+    ):
+        """Test error when BRUNO_COLLECTION_PATH contains only separators/whitespace."""
+        # Use pathsep only so all segments are empty after split (e.g. ":" or ";;" on Windows)
+        with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": os.pathsep * 2}):
+            mock_subprocess.run.return_value.returncode = 0
+
+            with pytest.raises(ValueError, match="contains no valid paths"):
+                MCPServer.create()
+
+    def test_create_star_path_loads_all_valid_subcollections(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        collection_paths,
+        bruno_env_star_path,
+    ):
+        """Test path ending in /* loads all valid subcollections from directory."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = [
+            CollectionFormat.BRU,
+            CollectionFormat.BRU,
+            ValueError("not a collection")
+        ]
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [
+                RequestMetadata(
+                    id="posts/list",
+                    name="List Posts",
+                    method="GET",
+                    url="u",
+                    file_path="posts/list.bru",
+                )
+            ],
+            [
+                RequestMetadata(
+                    id="users/list",
+                    name="List Users",
+                    method="GET",
+                    url="u",
+                    file_path="users/list.bru",
+                )
+            ],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        MCPServer.create()
+
+        mock_scanner_instance.scan_collection_for_format.assert_any_call(
+            collection_paths.collection_directory / "Posts_API"
+        )
+        mock_scanner_instance.scan_collection_for_format.assert_any_call(
+            collection_paths.collection_directory / "Users_API"
+        )
+        mock_scanner_instance.scan_collection_for_requests.assert_any_call(
+            CollectionInfo(
+                name="collection_directory/Posts_API",
+                path=(collection_paths.collection_directory / "Posts_API").resolve(),
+                format=CollectionFormat.BRU,
+            )
+        )
+        mock_scanner_instance.scan_collection_for_requests.assert_any_call(
+            CollectionInfo(
+                name="collection_directory/Users_API",
+                path=(collection_paths.collection_directory / "Users_API").resolve(),
+                format=CollectionFormat.BRU,
+            )
+        )
+        assert mock_scanner_instance.scan_collection_for_format.call_count == 3
+        assert mock_scanner_instance.scan_collection_for_requests.call_count == 2
+
+    def test_create_star_path_uses_qualified_names(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_star_path,
+    ):
+        """Test /* path names collections as parent_dir/collection_dir."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = [
+            CollectionFormat.BRU,
+            CollectionFormat.BRU,
+            ValueError("not a collection"),
+        ]
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [RequestMetadata(id="a", name="A", method="GET", url="u", file_path="a.bru")],
+            [RequestMetadata(id="b", name="B", method="GET", url="u", file_path="b.bru")],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        server = MCPServer.create()
+
+        collections = _list_collections_via_tool(server)
+        names = [c["name"] for c in collections]
+        assert "collection_directory/Users_API" in names
+        assert "collection_directory/Posts_API" in names
+
+    def test_create_mixed_paths_loads_both_explicit_and_directory_collections(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_mixed_paths,
+    ):
+        """Test mixed explicit path + /* path loads all collections."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = [
+            CollectionFormat.BRU,
+            CollectionFormat.BRU,
+            CollectionFormat.BRU,
+            ValueError("not a collection"),
+        ]
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [RequestMetadata(id="x", name="X", method="GET", url="u", file_path="x.bru")],
+            [RequestMetadata(id="a", name="A", method="GET", url="u", file_path="a.bru")],
+            [RequestMetadata(id="b", name="B", method="GET", url="u", file_path="b.bru")],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        server = MCPServer.create()
+
+        collections = _list_collections_via_tool(server)
+        assert collections[0]["name"] == "sample_collection"
+        names = [c["name"] for c in collections]
+        assert "collection_directory/Users_API" in names
+        assert "collection_directory/Posts_API" in names
+        assert len(collections) == 3
+
+    def test_create_star_path_skips_invalid_subdirs(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_star_path,
+    ):
+        """Test /* path silently skips subdirs without bruno.json."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = [
+            CollectionFormat.BRU,
+            CollectionFormat.BRU,
+            ValueError("not a collection"),
+        ]
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [RequestMetadata(id="a", name="A", method="GET", url="u", file_path="a.bru")],
+            [RequestMetadata(id="b", name="B", method="GET", url="u", file_path="b.bru")],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        server = MCPServer.create()
+
+        collections = _list_collections_via_tool(server)
+        names = [c["name"] for c in collections]
+        assert "collection_directory/not_a_collection" not in names
+        assert len(names) == 2
+
+    def test_create_star_path_raises_when_no_valid_collections(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_empty_star_path,
+    ):
+        """Test /* path raises ValueError when directory has no valid subcollections."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = ValueError(
+            "not a valid collection"
+        )
+        mock_subprocess.run.return_value.returncode = 0
+
+        with pytest.raises(ValueError) as exc_info:
+            MCPServer.create()
+
+        assert (
+            "no collections" in str(exc_info.value).lower()
+            or "not found" in str(exc_info.value).lower()
+        )
+
+    def test_create_star_path_raises_when_base_dir_missing(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        fixtures_dir,
+    ):
+        """Test /* path raises ValueError when base directory does not exist."""
+        nonexistent = fixtures_dir / "definitely_nonexistent_xyz123"
+        with patch.dict(os.environ, {"BRUNO_COLLECTION_PATH": f"{nonexistent}/*"}):
+            mock_subprocess.run.return_value.returncode = 0
+
+            with pytest.raises(ValueError) as exc_info:
+                MCPServer.create()
+
+            assert (
+                "exist" in str(exc_info.value).lower() or "not found" in str(exc_info.value).lower()
+            )
+
+    def test_create_raises_on_qualified_name_collision(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_collision_paths,
+    ):
+        """Test ValueError when two /* paths produce the same qualified collection name."""
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.return_value = CollectionFormat.BRU
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [RequestMetadata(id="r", name="R", method="GET", url="u", file_path="r.bru")],
+            [RequestMetadata(id="r", name="R", method="GET", url="u", file_path="r.bru")],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        with pytest.raises(ValueError) as exc_info:
+            MCPServer.create()
+
+        assert (
+            "collision" in str(exc_info.value).lower() or "duplicate" in str(exc_info.value).lower()
+        )
+
+    def test_create_single_path_opencollection_format(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        collection_paths,
+        bruno_env_opencollection_path,
+    ):
+        """The scanner mock returns OPENCOLLECTION for format and one YAML request.
+
+        MCPServer.create() runs with BRUNO_COLLECTION_PATH set to opencollection_collection.
+
+        scan_collection_for_requests receives CollectionInfo with OPENCOLLECTION format and name opencollection_collection.
+        """
+        mock_scanner_instance = mock_scanner_class.return_value
+        expected_metadata = [
+            RequestMetadata(
+                id="users/get-user",
+                name="Get User",
+                method="GET",
+                url="https://api.example.com/users/{{userId}}",
+                file_path="users/get-user.yml",
+            )
+        ]
+        mock_scanner_instance.scan_collection_for_format.return_value = (
+            CollectionFormat.OPENCOLLECTION
+        )
+        mock_scanner_instance.scan_collection_for_requests.return_value = expected_metadata
+        mock_subprocess.run.return_value.returncode = 0
+
+        MCPServer.create()
+
+        resolved = collection_paths.opencollection_collection.resolve()
+        mock_scanner_instance.scan_collection_for_format.assert_called_once_with(resolved)
+        info = mock_scanner_instance.scan_collection_for_requests.call_args[0][0]
+        assert info.format == CollectionFormat.OPENCOLLECTION
+        assert info.name == "opencollection_collection"
+        assert info.path == resolved
+
+    def test_create_multiple_paths_bru_and_opencollection(
+        self,
+        mock_cli_executor_class,
+        mock_fastmcp,
+        mock_scanner_class,
+        mock_subprocess,
+        bruno_env_bru_and_opencollection_path,
+    ):
+        """scan_collection_for_format returns BRU then OPENCOLLECTION; each scan returns one request.
+
+        MCPServer.create() runs with two path segments (sample_collection then opencollection_collection).
+
+        Two collections load; scan_collection_for_requests is called twice with matching formats; names are sample_collection and opencollection_collection.
+        """
+        mock_scanner_instance = mock_scanner_class.return_value
+        mock_scanner_instance.scan_collection_for_format.side_effect = [
+            CollectionFormat.BRU,
+            CollectionFormat.OPENCOLLECTION,
+        ]
+        mock_scanner_instance.scan_collection_for_requests.side_effect = [
+            [RequestMetadata(id="a", name="A", method="GET", url="u", file_path="a.bru")],
+            [RequestMetadata(id="b", name="B", method="GET", url="u", file_path="b.yml")],
+        ]
+        mock_subprocess.run.return_value.returncode = 0
+
+        server = MCPServer.create()
+
+        assert mock_scanner_instance.scan_collection_for_requests.call_count == 2
+        first_info = mock_scanner_instance.scan_collection_for_requests.call_args_list[0][0][0]
+        second_info = mock_scanner_instance.scan_collection_for_requests.call_args_list[1][0][0]
+        assert first_info.format == CollectionFormat.BRU
+        assert second_info.format == CollectionFormat.OPENCOLLECTION
+        assert first_info.name == "sample_collection"
+        assert second_info.name == "opencollection_collection"
 
 
 class TestListRequestsTool:
     """Test list_requests MCP tool registration and handler."""
 
-    @pytest.fixture
-    def mock_mcp(self):
-        """Mock FastMCP instance for tool registration tests."""
-        return Mock()
-
-    @pytest.fixture
-    def mock_executor(self):
-        """Mock executor for MCPServer initialization."""
-        return Mock()
-
-    @pytest.fixture
-    def empty_collection_metadata(self):
-        """Empty collection metadata for basic tests."""
-        return []
-
-    def test_list_requests_handler_callable(self, mock_mcp, mock_executor, empty_collection_metadata):
+    def test_list_requests_handler_callable(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
         """Test list_requests handler is registered and callable."""
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=empty_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        list_requests_handler = all_calls[1][0][0]
+        list_requests_handler = tool_decorator.call_args_list[1][0][0]
 
-        assert mock_mcp.tool.call_count == 3
+        assert mock_mcp.tool.call_count == 5
         assert callable(list_requests_handler)
         assert list_requests_handler.__name__ == "list_requests"
 
-    def test_list_requests_returns_expected_endpoints(self, mock_mcp, mock_executor):
-        """Test list_requests returns all requests from collection."""
+    def test_list_requests_returns_expected_endpoints(
+        self, mock_mcp, mock_executor, bruno_env_single_path
+    ):
+        """Test list_requests returns requests from active collection."""
         expected_requests = [
             RequestMetadata(
                 id="users/get-user",
@@ -356,13 +913,7 @@ class TestListRequestsTool:
                 file_path="posts/list-posts.bru",
             ),
         ]
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=expected_requests,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_executor, [expected_requests])
 
         tool_decorator = mock_mcp.tool.return_value
         handler = tool_decorator.call_args_list[1][0][0]
@@ -373,7 +924,9 @@ class TestListRequestsTool:
         assert result[1]["id"] == "posts/create-post"
         assert result[2]["id"] == "posts/list-posts"
 
-    def test_list_requests_returns_complete_endpoint_metadata(self, mock_mcp, mock_executor):
+    def test_list_requests_returns_complete_endpoint_metadata(
+        self, mock_mcp, mock_executor, bruno_env_single_path
+    ):
         """Test each endpoint includes all required metadata fields."""
         expected_requests = [
             RequestMetadata(
@@ -384,13 +937,7 @@ class TestListRequestsTool:
                 file_path="users/delete-user.bru",
             )
         ]
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=expected_requests,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_executor, [expected_requests])
 
         tool_decorator = mock_mcp.tool.return_value
         handler = tool_decorator.call_args_list[1][0][0]
@@ -404,101 +951,200 @@ class TestListRequestsTool:
         assert endpoint["file_path"] == "users/delete-user.bru"
         assert "{{userId}}" in endpoint["url"]
 
-    def test_list_requests_handles_empty_collection(self, mock_mcp, mock_executor, empty_collection_metadata):
-        """Test list_requests returns empty list when collection is empty."""
-        MCPServer(
-            collection_path=Path("/empty"),
-            executor=mock_executor,
-            collection_metadata=empty_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+    def test_list_requests_handles_empty_collection(
+        self, mock_mcp, mock_executor, bruno_env_single_path
+    ):
+        """Test list_requests returns empty list when active collection is empty."""
+        _create_server(mock_mcp, mock_executor, [[]])
 
         tool_decorator = mock_mcp.tool.return_value
-        handler = tool_decorator.call_args[0][0]
+        handler = tool_decorator.call_args_list[1][0][0]
         result = handler()
 
         assert result == []
         assert isinstance(result, list)
 
 
-class TestRunBrunoRequestTool:
-    """Test run_bruno_request MCP tool registration and handler."""
+class TestListRequestsExampleCall:
+    """Test example_call field in list_requests output."""
 
     @pytest.fixture
-    def mock_mcp(self):
-        """Mock FastMCP instance for tool registration tests."""
-        return Mock()
+    def captured_tool_handlers(self):
+        """Capture tool handlers registered via mcp.tool() for later invocation."""
+        handlers = {}
+
+        def capture(fn):
+            handlers[fn.__name__] = fn
+            return fn
+
+        mock_mcp = Mock()
+        mock_mcp.tool.return_value = capture
+        return handlers, mock_mcp
+
+    def test_list_requests_returns_correct_variable_names(
+        self,
+        sample_collection_dir,
+        bruno_env_single_path,
+        captured_tool_handlers,
+    ):
+        """example_call includes request_id, first environment name, and variable_overrides for env-defined vars."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        get_user = next(r for r in result if r["id"] == "users/get-user")
+        example = get_user["example_call"]
+        assert example["request_id"] == "users/get-user"
+        assert example["environment_name"] in ("local", "production")
+        assert "variable_overrides" in example
+        assert set(example["variable_overrides"].keys()) == {"userId", "authToken"}
+        for var_name, placeholder in example["variable_overrides"].items():
+            assert placeholder == f"<{var_name}>"
+
+    def test_list_requests_example_call_no_environments(
+        self,
+        second_collection_dir,
+        captured_tool_handlers,
+    ):
+        """No environments → example_call has only request_id."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+            with patch.dict(
+                os.environ, {"BRUNO_COLLECTION_PATH": str(second_collection_dir)}
+            ):
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        health_check = next(r for r in result if r["id"] == "health/check")
+        assert health_check["example_call"] == {"request_id": "health/check", 'environment_name': None, 'variable_overrides': None}
+
+    def test_list_requests_example_call_no_variable_overrides_when_request_has_no_vars(
+        self,
+        sample_collection_dir,
+        bruno_env_single_path,
+        captured_tool_handlers,
+    ):
+        """Request with no vars + envs → environment_name present but no variable_overrides."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        simple_get = next(r for r in result if r["id"] == "posts/simple-get")
+        example = simple_get["example_call"]
+        assert example["request_id"] == "posts/simple-get"
+        assert example["environment_name"] in ("local", "production")
+        assert example["variable_overrides"] is None
+
+    def test_list_requests_example_call_excludes_undefined_and_process_env_vars(
+        self,
+        sample_collection_dir,
+        bruno_env_single_path,
+        captured_tool_handlers,
+    ):
+        """Vars not in any env are omitted; process.env vars never appear in variable_overrides."""
+        handlers, mock_mcp = captured_tool_handlers
+
+        # Arrange
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                mock_subprocess.run.return_value.returncode = 0
+                server = MCPServer.create()
+
+        # Act
+        list_requests_handler = handlers["list_requests"]
+        result = list_requests_handler()
+
+        # Assert
+        request_with_undefined = next(
+            r for r in result if r["id"] == "users/request-with-undefined-var"
+        )
+        overrides = request_with_undefined["example_call"]["variable_overrides"]
+        assert "undefinedVar" not in overrides
+        assert "userId" in overrides
+        assert "process.env" not in str(overrides.keys())
+
+
+class TestRunBrunoRequestTool:
+    """Test run_request_by_id MCP tool registration and handler."""
 
     @pytest.fixture
     def mock_cli_executor(self):
         """Mock CLIExecutor instance for execution tests."""
         return Mock(spec=CLIExecutor)
 
-    @pytest.fixture
-    def empty_collection_metadata(self):
-        """Empty collection metadata for basic tests."""
-        return []
-
-    @pytest.fixture
-    def sample_collection_metadata(self):
-        """Sample collection metadata with one request."""
-        return [
-            RequestMetadata(
-                id="users/get-user",
-                name="Get User",
-                method="GET",
-                url="https://api.example.com/users/{{userId}}",
-                file_path="users/get-user.bru",
-            )
-        ]
-
-    def test_run_request_by_id_tool_registered(self, mock_mcp, mock_cli_executor, empty_collection_metadata):
+    def test_run_request_by_id_tool_registered(
+        self, mock_mcp, mock_cli_executor, collection_metadata, bruno_env_single_path
+    ):
         """Test run_request_by_id tool is registered with correct name."""
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_cli_executor,
-            collection_metadata=empty_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_cli_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        run_request_handler = all_calls[0][0][0]
+        run_request_handler = tool_decorator.call_args_list[0][0][0]
 
         assert run_request_handler.__name__ == "run_request_by_id"
 
-    def test_tool_passes_file_path_to_executor(
-        self, sample_collection_dir, mock_cli_executor, mock_mcp, sample_collection_metadata
+    def test_tool_passes_file_path_and_active_collection_to_executor(
+        self,
+        collection_paths,
+        mock_cli_executor,
+        mock_mcp,
+        collection_metadata,
+        bruno_env_single_path,
     ):
-        """Test file path passed correctly to executor."""
+        """Test file path and active CollectionInfo passed correctly to executor."""
         mock_cli_executor.execute.return_value = BruResponse(
             status=200,
             headers={},
             body="",
         )
 
-        MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_cli_executor,
-            collection_metadata=sample_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_cli_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        handler = all_calls[0][0][0]
+        handler = tool_decorator.call_args_list[0][0][0]
         handler(request_id="users/get-user")
 
         mock_cli_executor.execute.assert_called_once()
         call_args = mock_cli_executor.execute.call_args
         assert call_args[0][0] == Path("users/get-user.bru")
-        assert call_args[0][1] == sample_collection_dir
+        active = call_args[0][1]
+        assert isinstance(active, CollectionInfo)
+        assert active.path.resolve() == collection_paths.sample_collection.resolve()
+        assert active.format == CollectionFormat.BRU
+        assert active.name == "sample_collection"
 
     def test_tool_returns_executor_response(
-        self, sample_collection_dir, mock_cli_executor, mock_mcp, sample_collection_metadata
+        self,
+        mock_cli_executor,
+        mock_mcp,
+        collection_metadata,
+        bruno_env_single_path,
     ):
         """Test handler returns executor response correctly."""
         expected_response = BruResponse(
@@ -508,17 +1154,10 @@ class TestRunBrunoRequestTool:
         )
         mock_cli_executor.execute.return_value = expected_response
 
-        MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_cli_executor,
-            collection_metadata=sample_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_cli_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        handler = all_calls[0][0][0]
+        handler = tool_decorator.call_args_list[0][0][0]
         result = handler(request_id="users/get-user")
 
         assert result["status"] == 200
@@ -526,7 +1165,11 @@ class TestRunBrunoRequestTool:
         assert result["body"] == '{"id": "123", "name": "John"}'
 
     def test_tool_passes_environment_name_to_executor(
-        self, sample_collection_dir, mock_cli_executor, mock_mcp, sample_collection_metadata
+        self,
+        mock_cli_executor,
+        mock_mcp,
+        collection_metadata,
+        bruno_env_single_path,
     ):
         """Test environment_name passed correctly to executor."""
         mock_cli_executor.execute.return_value = BruResponse(
@@ -534,17 +1177,10 @@ class TestRunBrunoRequestTool:
             headers={},
             body='{"id": "456"}',
         )
-        MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_cli_executor,
-            collection_metadata=sample_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_cli_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        handler = all_calls[0][0][0]
+        handler = tool_decorator.call_args_list[0][0][0]
         result = handler(request_id="users/get-user", environment_name="local")
 
         assert result["status"] == 200
@@ -553,7 +1189,11 @@ class TestRunBrunoRequestTool:
         assert call_args[0][2] == "local"
 
     def test_tool_passes_variable_overrides_to_executor(
-        self, sample_collection_dir, mock_cli_executor, mock_mcp, sample_collection_metadata
+        self,
+        mock_cli_executor,
+        mock_mcp,
+        collection_metadata,
+        bruno_env_single_path,
     ):
         """Test variable_overrides passed correctly to executor."""
         mock_cli_executor.execute.return_value = BruResponse(
@@ -561,17 +1201,10 @@ class TestRunBrunoRequestTool:
             headers={},
             body='{"id": "456"}',
         )
-        MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_cli_executor,
-            collection_metadata=sample_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_cli_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        handler = all_calls[0][0][0]
+        handler = tool_decorator.call_args_list[0][0][0]
         result = handler(request_id="users/get-user", variable_overrides={"userId": "456"})
 
         assert result["status"] == 200
@@ -580,20 +1213,17 @@ class TestRunBrunoRequestTool:
         assert call_args[0][3] == {"userId": "456"}
 
     def test_tool_raises_error_for_invalid_request_id(
-        self, sample_collection_dir, mock_cli_executor, mock_mcp, sample_collection_metadata
+        self,
+        mock_cli_executor,
+        mock_mcp,
+        collection_metadata,
+        bruno_env_single_path,
     ):
         """Test error handling when request_id not found."""
-        MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_cli_executor,
-            collection_metadata=sample_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=EnvParser(),
-        )
+        _create_server(mock_mcp, mock_cli_executor, [collection_metadata[0]])
 
         tool_decorator = mock_mcp.tool.return_value
-        all_calls = tool_decorator.call_args_list
-        handler = all_calls[0][0][0]
+        handler = tool_decorator.call_args_list[0][0][0]
 
         with pytest.raises(ValueError, match="Request not found"):
             handler(request_id="users/nonexistent")
@@ -603,33 +1233,21 @@ class TestListEnvironmentsTool:
     """Test list_environments MCP tool registration and handler."""
 
     @pytest.fixture
-    def mock_mcp(self):
-        """Mock FastMCP instance for tool registration tests."""
-        return Mock()
-
-    @pytest.fixture
-    def mock_executor(self):
-        """Mock executor for MCPServer initialization."""
-        return Mock()
-
-    @pytest.fixture
     def mock_env_parser(self):
         """Mock EnvParser instance for environment discovery."""
         return Mock()
 
-    @pytest.fixture
-    def empty_collection_metadata(self):
-        """Empty collection metadata for basic tests."""
-        return []
-
-    def test_list_environments_tool_registered_and_callable(self, mock_mcp, mock_executor, mock_env_parser, empty_collection_metadata):
+    def test_list_environments_tool_registered_and_callable(
+        self,
+        mock_mcp,
+        mock_executor,
+        mock_env_parser,
+        collection_metadata,
+        bruno_env_single_path,
+    ):
         """Test list_environments tool is registered and callable."""
-        MCPServer(
-            collection_path=Path("/test"),
-            executor=mock_executor,
-            collection_metadata=empty_collection_metadata,
-            mcp=mock_mcp,
-            env_parser=mock_env_parser,
+        _create_server(
+            mock_mcp, mock_executor, [collection_metadata[0]], mock_env_parser=mock_env_parser
         )
         tool_decorator = mock_mcp.tool.return_value
         list_environments_handler = tool_decorator.call_args_list[2][0][0]
@@ -637,20 +1255,29 @@ class TestListEnvironmentsTool:
         assert callable(list_environments_handler)
         assert list_environments_handler.__name__ == "list_environments"
 
-    def test_list_environments_returns_parsed_environment_list(self, mock_mcp, mock_executor, mock_env_parser, sample_collection_dir):
-        """Test tool returns environments from EnvParser.list_environments()."""
+    def test_list_environments_returns_from_active_collection(
+        self,
+        mock_mcp,
+        mock_executor,
+        mock_env_parser,
+        collection_paths,
+        bruno_env_single_path,
+    ):
+        """Test tool returns environments from active collection."""
         expected_environments = [
-            BruEnvironment(name="local", variables={"baseUrl": "http://localhost:3000", "apiVersion": "v1"}),
-            BruEnvironment(name="production", variables={"baseUrl": "https://api.example.com", "apiKey": "{{process.env.API_KEY}}"}),
+            BruEnvironment(
+                name="local", variables={"baseUrl": "http://localhost:3000", "apiVersion": "v1"}
+            ),
+            BruEnvironment(
+                name="production",
+                variables={
+                    "baseUrl": "https://api.example.com",
+                    "apiKey": "{{process.env.API_KEY}}",
+                },
+            ),
         ]
         mock_env_parser.list_environments.return_value = expected_environments
-        server = MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_executor,
-            collection_metadata=[],
-            mcp=mock_mcp,
-            env_parser=mock_env_parser,
-        )
+        _create_server(mock_mcp, mock_executor, [[]], mock_env_parser=mock_env_parser)
         tool_decorator = mock_mcp.tool.return_value
         list_environments_handler = tool_decorator.call_args_list[2][0][0]
 
@@ -661,18 +1288,20 @@ class TestListEnvironmentsTool:
         assert result[0]["variables"]["baseUrl"] == "http://localhost:3000"
         assert result[1]["name"] == "production"
         assert result[1]["variables"]["apiKey"] == "{{process.env.API_KEY}}"
-        mock_env_parser.list_environments.assert_called_once_with(sample_collection_dir)
+        mock_env_parser.list_environments.assert_called_once_with(
+            CollectionInfo(
+                name="sample_collection",
+                path=collection_paths.sample_collection.resolve(),
+                format=CollectionFormat.BRU,
+            )
+        )
 
-    def test_list_environments_handles_empty_environments_directory(self, mock_mcp, mock_executor, mock_env_parser, sample_collection_dir):
+    def test_list_environments_handles_empty_environments_directory(
+        self, mock_mcp, mock_executor, mock_env_parser, bruno_env_single_path
+    ):
         """Test tool returns empty list when no environments found."""
         mock_env_parser.list_environments.return_value = []
-        server = MCPServer(
-            collection_path=sample_collection_dir,
-            executor=mock_executor,
-            collection_metadata=[],
-            mcp=mock_mcp,
-            env_parser=mock_env_parser,
-        )
+        _create_server(mock_mcp, mock_executor, [[]], mock_env_parser=mock_env_parser)
         tool_decorator = mock_mcp.tool.return_value
         list_environments_handler = tool_decorator.call_args_list[2][0][0]
 
@@ -680,3 +1309,123 @@ class TestListEnvironmentsTool:
 
         assert result == []
 
+
+class TestListCollectionsTool:
+    """Test list_collections MCP tool registration and handler."""
+
+    def test_list_collections_tool_registered_and_callable(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
+        """Test list_collections tool is registered and callable."""
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
+        tool_decorator = mock_mcp.tool.return_value
+        list_collections_handler = tool_decorator.call_args_list[3][0][0]
+
+        assert callable(list_collections_handler)
+        assert list_collections_handler.__name__ == "list_collections"
+
+    def test_list_collections_returns_all_with_name_and_path(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_two_paths
+    ):
+        """Test returns list of {name, path} for each collection."""
+        _create_server(
+            mock_mcp, mock_executor, [collection_metadata[0], collection_metadata[1]]
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args_list[3][0][0]
+        result = handler()
+
+        assert len(result) == 2
+        assert result[0]["name"] == "sample_collection"
+        assert "path" in result[0]
+        assert result[1]["name"] == "second_collection"
+        assert "path" in result[1]
+
+    def test_list_collections_works_with_single_collection(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
+        """Test single collection returns one entry."""
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args_list[3][0][0]
+        result = handler()
+
+        assert len(result) == 1
+        assert result[0]["name"] == "sample_collection"
+        assert "path" in result[0]
+
+
+class TestSetActiveCollectionTool:
+    """Test set_active_collection MCP tool registration and handler."""
+
+    def test_set_active_collection_tool_registered(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_two_paths
+    ):
+        """Test set_active_collection tool is registered."""
+        _create_server(
+            mock_mcp, mock_executor, [collection_metadata[0], collection_metadata[1]]
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args_list[4][0][0]
+
+        assert callable(handler)
+        assert handler.__name__ == "set_active_collection"
+
+    def test_set_active_collection_switches_and_returns_name(
+        self,
+        mock_mcp,
+        mock_executor,
+        collection_metadata,
+        bruno_env_two_paths,
+    ):
+        """Test switches active collection, returns new name, list_requests reflects change."""
+        _create_server(
+            mock_mcp, mock_executor, [collection_metadata[0], collection_metadata[1]]
+        )
+        tool_decorator = mock_mcp.tool.return_value
+        set_handler = tool_decorator.call_args_list[4][0][0]
+        list_handler = tool_decorator.call_args_list[1][0][0]
+
+        result = set_handler(collection_name="second_collection")
+
+        assert result == "second_collection"
+        list_result = list_handler()
+        assert len(list_result) == 1
+        assert list_result[0]["id"] == "health/check"
+
+    def test_set_active_collection_raises_for_unknown_name(
+        self, mock_mcp, mock_executor, collection_metadata, bruno_env_single_path
+    ):
+        """Test unknown collection_name raises ValueError with name in message."""
+        _create_server(mock_mcp, mock_executor, [collection_metadata[0]])
+        tool_decorator = mock_mcp.tool.return_value
+        handler = tool_decorator.call_args_list[4][0][0]
+
+        with pytest.raises(ValueError) as exc_info:
+            handler(collection_name="nonexistent")
+
+        assert "nonexistent" in str(exc_info.value)
+
+    def test_set_active_collection_works_with_qualified_name(
+        self,
+        mock_mcp,
+        mock_executor,
+        bruno_env_star_path,
+    ):
+        """set_active_collection accepts qualified names from /* loading (real scanner + fixtures)."""
+        with patch("bruno_mcp.server.FastMCP", return_value=mock_mcp):
+            with patch("bruno_mcp.server.CLIExecutor", return_value=mock_executor):
+                with patch("bruno_mcp.server.subprocess") as mock_subprocess:
+                    mock_subprocess.run.return_value.returncode = 0
+                    MCPServer.create()
+
+        tool_decorator = mock_mcp.tool.return_value
+        set_active_collection_handler = tool_decorator.call_args_list[4][0][0]
+        list_active_collection_handler = tool_decorator.call_args_list[1][0][0]
+
+        result = set_active_collection_handler(collection_name="collection_directory/Users_API")
+        list_result = list_active_collection_handler()
+
+        assert result == "collection_directory/Users_API"
+        assert len(list_result) == 1
+        assert list_result[0]["id"] == "users/list"

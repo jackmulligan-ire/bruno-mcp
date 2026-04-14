@@ -46,7 +46,7 @@ Configure the MCP server by adding an entry to your IDE. For Cursor, create or e
 }
 ```
 
-The only configuration required is `BRUNO_COLLECTION_PATH`, which should point to your Bruno collection directory.
+The only configuration required is `BRUNO_COLLECTION_PATH`, which should point to your Bruno collection directory. To load multiple collections, separate paths with `:` (Unix/Mac) or `;` (Windows), e.g. `BRUNO_COLLECTION_PATH="/path/to/collection1:/path/to/collection2"`.
 
 ### Alternative: Run Server Manually
 
@@ -79,6 +79,10 @@ Then configure your MCP client with the full paths:
 After updating the configuration file, enable the server in your IDE's MCP settings.
 
 ## Usage Notes
+
+### Multiple Collections
+
+When `BRUNO_COLLECTION_PATH` contains multiple paths (separated by `:` on Unix/Mac or `;` on Windows), the server loads all collections at startup. The first path is the initial active collection. Use the `list_collections` tool or `bruno://collections` resource to see available collections, and `set_active_collection` to switch which collection tools operate on.
 
 ### Variable Overrides
 

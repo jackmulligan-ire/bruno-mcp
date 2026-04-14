@@ -1,0 +1,4 @@
+# OpenCollection root marker for parser and scanner fixtures.
+
+meta:
+  fixture: opencollection_collection
